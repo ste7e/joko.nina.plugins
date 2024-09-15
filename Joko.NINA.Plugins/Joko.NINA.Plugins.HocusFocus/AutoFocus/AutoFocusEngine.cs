@@ -1365,22 +1365,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             OnStarted();
 
             var state = await InitializeState(options, imagingFilter, regions, token, progress);
-            if (state.Options.Save) {
-                if (string.IsNullOrWhiteSpace(state.Options.SavePath)) {
-                    Notification.ShowWarning("No save path specified in Hocus Focus Auto Focus Options");
-                    Logger.Warning("No save path specified in Hocus Focus Auto Focus Options");
-                } else if (!Directory.Exists(state.Options.SavePath)) {
-                    Notification.ShowWarning($"The save path {state.Options.SavePath} does not exist");
-                    Logger.Warning($"The save path {state.Options.SavePath} specified in Hocus Focus Auto Focus Options does not exist");
-                } else {
-                    var folderName = $"AutoFocus_{DateTime.Now:yyyyMMdd_HHmmss}";
-                    var targetPath = Path.Combine(state.Options.SavePath, folderName);
-                    Logger.Info($"Saving AutoFocus run to {targetPath}");
-                    Directory.CreateDirectory(targetPath);
-                    state.SaveFolder = targetPath;
-                }
-            }
-
             state.OnNextAttempt();
             OnIterationStarted(state.AttemptNumber);
             foreach (var regionState in state.FocusRegionStates) {
