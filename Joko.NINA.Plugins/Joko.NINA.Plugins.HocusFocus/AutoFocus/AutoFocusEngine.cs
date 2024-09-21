@@ -958,6 +958,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 // Make sure this is set after changing the filter, in case offsets are used
                 int initialFocusPosition = focuserMediator.GetInfo().Position;
                 autoFocusState.InitialFocuserPosition = initialFocusPosition;
+                Logger.Info($"Starting AutoFocus with initial position {initialFocusPosition}");
 
                 do {
                     await StartInitialFocusPoints(initialFocusPosition, autoFocusState, token, progress);

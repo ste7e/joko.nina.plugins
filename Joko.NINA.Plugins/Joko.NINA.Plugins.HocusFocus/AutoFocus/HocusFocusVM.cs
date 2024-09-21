@@ -469,7 +469,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         private void AutoFocusEngine_Completed(object sender, AutoFocusCompletedEventArgs e) {
             var firstRegion = e.RegionHFRs[0];
             AutoFocusEngine_CompletedNoReport(sender, e);
-
+            Logger.Info($"AutoFocus completed with focuser starting at {e.InitialFocusPosition} and ending at {FinalFocuserPosition}");
             var report = GenerateReport(
                 initialFocusPosition: e.InitialFocusPosition,
                 initialHFR: firstRegion.InitialHFR ?? 0.0d,
