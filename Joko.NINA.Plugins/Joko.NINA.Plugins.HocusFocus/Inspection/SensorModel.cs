@@ -14,6 +14,7 @@ using KdTree;
 using KdTree.Math;
 using NINA.Core.Utility;
 using NINA.Core.Utility.Notification;
+using NINA.Image.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.AutoFocus;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
@@ -30,13 +31,18 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
     public class SensorDetectedStars {
 
-        public SensorDetectedStars(double focuserPosition, HocusFocusStarDetectionResult starDetectionResult) {
+        public SensorDetectedStars(
+            double focuserPosition,
+            HocusFocusStarDetectionResult starDetectionResult,
+            IRenderedImage image) {
             this.FocuserPosition = focuserPosition;
             this.StarDetectionResult = starDetectionResult;
+            this.Image = image;
         }
 
         public double FocuserPosition { get; private set; }
         public HocusFocusStarDetectionResult StarDetectionResult { get; private set; }
+        public IRenderedImage Image { get; private set; }
 
         public override string ToString() {
             return $"{{{nameof(FocuserPosition)}={FocuserPosition.ToString()}, {nameof(StarDetectionResult)}={StarDetectionResult}}}";
@@ -115,7 +121,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 var imageSize = firstStarDetectionResult.ImageSize;
                 var pixelSize = firstStarDetectionResult.PixelSize;
                 Logger.Info($"Building Sensor Model. FRatio ({fRatio}), Focuser Size ({focuserSizeMicrons}), Pixel Size ({pixelSize}), Image size ({imageSize})");
-                var dataPoints = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize, stepSize: stepSize);
+                var fitResult = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize, stepSize: stepSize);
+                var dataPoints = fitResult.Points;
                 if (dataPoints.Count < 9) {
                     throw new Exception($"Need at least 9 registered stars. Found {dataPoints.Count}");
                 }
@@ -145,7 +152,14 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 }
 
                 DisplayedSensorModel = solution;
-                SensorModelResult.Update(solution, imageSize, pixelSizeMicrons: pixelSize, fRatio: fRatio, focuserStepSizeMicrons: focuserSizeMicrons, finalFocusPosition: finalFocusPosition);
+                SensorModelResult.Update(
+                    solution,
+                    imageSize,
+                    pixelSizeMicrons: pixelSize,
+                    fRatio: fRatio,
+                    focuserStepSizeMicrons: focuserSizeMicrons,
+                    finalFocusPosition: finalFocusPosition,
+                    registeredStars: fitResult.RegisteredStars);
 
                 var historyId = Interlocked.Increment(ref nextHistoryId);
                 SensorTiltHistoryModels.Insert(0, new SensorParaboloidTiltHistoryModel(
@@ -296,7 +310,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             }
         }
 
-        private List<SensorParaboloidDataPoint> RegisterStarsAndFit(
+        private RegistrationAndFitResult RegisterStarsAndFit(
             List<SensorDetectedStars> allDetectedStars,
             System.Drawing.Size imageSize,
             double focuserSizeMicrons,
@@ -383,7 +397,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         var sourceStar = (HocusFocusDetectedStar)detectedStars[sourceIndex];
                         var matchedStar = new MatchedStar() {
                             FocuserPosition = focuserPosition,
-                            Star = sourceStar
+                            Star = sourceStar,
+                            ImageIndex = i
                         };
                         registeredStars[globalIndex].MatchedStars.Add(matchedStar);
                     }
@@ -435,9 +450,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 }
 
                 if (this.inspectorOptions.InterpolationEnabled && sensorModelDataPoints.Count > 5) {
-                    return ToInterpolatedGrid(sensorModelDataPoints, imageSize);
+                    return new RegistrationAndFitResult(ToInterpolatedGrid(sensorModelDataPoints, imageSize), registeredStars);
                 } else {
-                    return sensorModelDataPoints;
+                    return new RegistrationAndFitResult(sensorModelDataPoints, registeredStars);
                 }
             }
         }
@@ -445,7 +460,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
         private void UpdateTiltModels(SensorParaboloidTiltHistoryModel historyModel) {
             SensorModelResult.Update(
                 sensorModel: historyModel.SensorModel, imageSize: historyModel.ImageSize, pixelSizeMicrons: historyModel.PixelSizeMicrons,
-                fRatio: historyModel.FRatio, focuserStepSizeMicrons: historyModel.FocuserSizeMicrons, finalFocusPosition: historyModel.FinalFocusPosition);
+                fRatio: historyModel.FRatio, focuserStepSizeMicrons: historyModel.FocuserSizeMicrons, finalFocusPosition: historyModel.FinalFocusPosition,
+                registeredStars: []);
             DisplayedSensorModel = historyModel.SensorModel;
         }
 
@@ -525,16 +541,17 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             public int GlobalIndex { get; set; }
         }
 
-        private class MatchedStar {
+        public class MatchedStar {
             public double FocuserPosition { get; set; }
             public HocusFocusDetectedStar Star { get; set; }
+            public int ImageIndex { get; set; }
 
             public override string ToString() {
-                return $"{{{nameof(FocuserPosition)}={FocuserPosition.ToString()}, {nameof(Star)}={Star}}}";
+                return $"{{{nameof(FocuserPosition)}={FocuserPosition.ToString()}, {nameof(Star)}={Star}, {nameof(ImageIndex)}={ImageIndex}}}";
             }
         }
 
-        private class RegisteredStar {
+        public class RegisteredStar {
             public double RegistrationX { get; set; } = double.NaN;
             public double RegistrationY { get; set; } = double.NaN;
             public HyperbolicFittingAlglib Fitting { get; set; }

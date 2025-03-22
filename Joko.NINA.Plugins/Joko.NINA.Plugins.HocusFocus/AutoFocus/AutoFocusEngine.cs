@@ -318,6 +318,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             public int FocuserPosition { get; private set; }
             public bool FinalValidation { get; private set; }
             public StarDetectionResult StarDetectionResult { get; set; }
+            public IRenderedImage PreservedExposure { get; set; }
 
             private bool measurementStarted = false;
             private readonly AutoFocusState state;
@@ -519,6 +520,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 }
 
                 imageState.StarDetectionResult = analysisResult;
+                if (state.Options.PreserveExposures) {
+                    imageState.PreservedExposure = image;
+                }
 
                 Logger.Debug($"Current Focus - Position: {imageState.FocuserPosition}, HFR: {analysisResult.AverageHFR}");
                 return new MeasureAndError() { Measure = analysisResult.AverageHFR, Stdev = analysisResult.HFRStdDev };
@@ -939,21 +943,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             bool reattempt;
 
             using (var stopWatch = MyStopWatch.Measure()) {
-                if (autoFocusState.Options.Save) {
-                    if (string.IsNullOrWhiteSpace(autoFocusState.Options.SavePath)) {
-                        Notification.ShowWarning("No save path specified in Hocus Focus Auto Focus Options");
-                        Logger.Warning("No save path specified in Hocus Focus Auto Focus Options");
-                    } else if (!Directory.Exists(autoFocusState.Options.SavePath)) {
-                        Notification.ShowWarning($"The save path {autoFocusState.Options.SavePath} does not exist");
-                        Logger.Warning($"The save path {autoFocusState.Options.SavePath} specified in Hocus Focus Auto Focus Options does not exist");
-                    } else {
-                        var folderName = $"AutoFocus_{DateTime.Now:yyyyMMdd_HHmmss}";
-                        var targetPath = Path.Combine(autoFocusState.Options.SavePath, folderName);
-                        Logger.Info($"Saving AutoFocus run to {targetPath}");
-                        Directory.CreateDirectory(targetPath);
-                        autoFocusState.SaveFolder = targetPath;
-                    }
-                }
+                InitializeSave(autoFocusState);
 
                 // Make sure this is set after changing the filter, in case offsets are used
                 int initialFocusPosition = focuserMediator.GetInfo().Position;
@@ -1294,7 +1284,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     EstimatedFinalHFR = rs.FinalFocusPoint?.Y ?? double.NaN,
                     Fittings = rs.Fittings,
                     RejectedPoints = rs.RejectedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray()
-                }).OrderBy(r => r.RegionIndex).ToArray()
+                }).OrderBy(r => r.RegionIndex).ToArray(),
+                SaveFolder = autoFocusState.SaveFolder
             };
         }
 
@@ -1362,10 +1353,30 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             return RerunImpl(options, savedAttempt, imagingFilter, regions, token, progress);
         }
 
+        private void InitializeSave(AutoFocusState autoFocusState) {
+            if (autoFocusState.Options.Save) {
+                if (string.IsNullOrWhiteSpace(autoFocusState.Options.SavePath)) {
+                    Notification.ShowWarning("No save path specified in Hocus Focus Auto Focus Options");
+                    Logger.Warning("No save path specified in Hocus Focus Auto Focus Options");
+                } else if (!Directory.Exists(autoFocusState.Options.SavePath)) {
+                    Notification.ShowWarning($"The save path {autoFocusState.Options.SavePath} does not exist");
+                    Logger.Warning($"The save path {autoFocusState.Options.SavePath} specified in Hocus Focus Auto Focus Options does not exist");
+                } else {
+                    var folderName = $"AutoFocus_{DateTime.Now:yyyyMMdd_HHmmss}";
+                    var targetPath = Path.Combine(autoFocusState.Options.SavePath, folderName);
+                    Logger.Info($"Saving AutoFocus run to {targetPath}");
+                    Directory.CreateDirectory(targetPath);
+                    autoFocusState.SaveFolder = targetPath;
+                }
+            }
+        }
+
         private async Task<AutoFocusResult> RerunImpl(AutoFocusEngineOptions options, SavedAutoFocusAttempt savedAttempt, FilterInfo imagingFilter, List<StarDetectionRegion> regions, CancellationToken token, IProgress<ApplicationStatus> progress) {
             OnStarted();
 
             var state = await InitializeState(options, imagingFilter, regions, token, progress);
+            InitializeSave(state);
+
             state.OnNextAttempt();
             OnIterationStarted(state.AttemptNumber);
             foreach (var regionState in state.FocusRegionStates) {
@@ -1452,7 +1463,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                         EstimatedFinalHFR = rs.FinalFocusPoint?.Y ?? double.NaN,
                         Fittings = rs.Fittings,
                         RejectedPoints = rs.RejectedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray()
-                    }).OrderBy(r => r.RegionIndex).ToArray()
+                    }).OrderBy(r => r.RegionIndex).ToArray(),
+                    SaveFolder = state.SaveFolder
                 };
             } finally {
                 await Task.Delay(1000);
@@ -1500,7 +1512,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 RegionIndex = regionState.RegionIndex,
                 Region = regionState.Region,
                 FocuserPosition = imageState.FocuserPosition,
-                StarDetectionResult = imageState.StarDetectionResult
+                StarDetectionResult = imageState.StarDetectionResult,
+                Image = imageState.PreservedExposure
             });
         }
 

@@ -58,6 +58,9 @@ using NINA.Astrometry;
 using NINA.Equipment.Equipment.MyTelescope;
 using NINA.Joko.Plugins.HocusFocus.Inspection;
 using NINA.Image.Interfaces;
+using Accord.Imaging.Filters;
+using System.Drawing;
+using System.Windows.Media.Imaging;
 
 namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
@@ -218,7 +221,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                         return false;
                     }
 
-                    var autoFocusAnalysisResult = await AnalyzeAutoFocusResult(result, sensorCurveModelEnabled: sensorCurveModelEnabled, ct: localAnalyzeCts.Token);
+                    var autoFocusAnalysisResult = await AnalyzeAutoFocusResult(options, result, sensorCurveModelEnabled: sensorCurveModelEnabled, ct: localAnalyzeCts.Token);
                     if (!autoFocusAnalysisResult) {
                         InspectorErrorText = "AutoFocus Analysis Failed. View saved AF report in the AutoFocus tab.";
                         Notification.ShowError("AutoFocus Analysis Failed. View saved AF report in the AutoFocus tab.");
@@ -270,7 +273,11 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
         private bool focuserStepSizeWarningShowed = false;
 
-        private async Task<bool> AnalyzeAutoFocusResult(AutoFocusResult result, bool sensorCurveModelEnabled, CancellationToken ct) {
+        private async Task<bool> AnalyzeAutoFocusResult(
+            AutoFocusEngineOptions options,
+            AutoFocusResult result,
+            bool sensorCurveModelEnabled,
+            CancellationToken ct) {
             if (result == null || !result.Succeeded) {
                 Logger.Error("Inspection analysis failed, due to failed AutoFocus");
                 return false;
@@ -301,12 +308,108 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     finalFocusPosition: finalFocuserPosition,
                     stepSize: result.StepSize,
                     ct: ct);
+
+                if (!String.IsNullOrEmpty(result.SaveFolder)) {
+                    await SaveRegisteredImages(result.SaveFolder, SensorModel.SensorModelResult.RegisteredStars);
+                }
             }
 
             UpdateBackfocusMeasurements(result);
             TiltModel.UpdateTiltModel(result, fRatio: profileService.ActiveProfile.TelescopeSettings.FocalRatio, backfocusFocuserPositionDelta: BackfocusFocuserPositionDelta);
             AutoFocusCompleted = true;
             return true;
+        }
+
+        private async Task SaveRegisteredImages(
+            String saveFolder,
+            SensorModel.RegisteredStar[] registeredStars) {
+            if (string.IsNullOrWhiteSpace(saveFolder)) {
+                Logger.Error("SavePath empty. Not saving registered images");
+                return;
+            }
+            if (!Directory.Exists(saveFolder)) {
+                Logger.Error($"SavePath {saveFolder} does not exist. Not saving registered images");
+                return;
+            }
+
+            Logger.Info($"Saving registered images to {saveFolder}");
+            var colors = new System.Windows.Media.Color[] { Colors.Blue, Colors.Red, Colors.Purple, Colors.Green, Colors.Yellow, Colors.Orange };
+            Dictionary<int, int> outputIndexMap = FullSensorDetectedStars
+                .Select((stars, sourceIdx) => (stars, sourceIdx))
+                .OrderBy(x => x.stars.FocuserPosition)
+                .Select((kv, idx) => (kv.sourceIdx, idx))
+                .ToDictionary();
+
+            await Task.WhenAll(Enumerable.Range(0, FullSensorDetectedStars.Count).Select(i => Task.Run(() => {
+                var detectedStars = FullSensorDetectedStars[i];
+                var imageToAnnotate = detectedStars.Image.Image;
+                if (imageToAnnotate.Format == PixelFormats.Rgb48) {
+                    using (var source = ImageUtility.BitmapFromSource(imageToAnnotate, System.Drawing.Imaging.PixelFormat.Format48bppRgb)) {
+                        using (var img = new Grayscale(0.2125, 0.7154, 0.0721).Apply(source)) {
+                            imageToAnnotate = ImageUtility.ConvertBitmap(img, PixelFormats.Gray16);
+                            imageToAnnotate.Freeze();
+                        }
+                    }
+                }
+
+                var brushes = colors.Select(c => new SolidBrush(c.ToDrawingColor())).ToArray();
+                var pens = brushes.Select(b => new System.Drawing.Pen(b)).ToArray();
+                var annotationFont = new Font(
+                    starAnnotatorOptions.AnnotationFontFamily.ToDrawingFontFamily(),
+                    starAnnotatorOptions.AnnotationFontSizePoints,
+                    System.Drawing.FontStyle.Regular,
+                    GraphicsUnit.Point);
+
+                try {
+                    using (var bmp = ImageUtility.Convert16BppTo8Bpp(imageToAnnotate)) {
+                        using (var newBitmap = new Bitmap(bmp.Width, bmp.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb)) {
+                            Graphics graphics = Graphics.FromImage(newBitmap);
+                            graphics.DrawImage(bmp, 0, 0);
+                            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+
+                            for (int starIdx = 0; starIdx < registeredStars.Length; starIdx++) {
+                                var star = registeredStars[starIdx];
+                                var starCenterPen = pens[starIdx % pens.Length];
+                                var annotationBrush = brushes[starIdx % pens.Length];
+                                foreach (var matchedStar in star.MatchedStars) {
+                                    if (matchedStar.ImageIndex == i) {
+                                        var boundingBox = matchedStar.Star.BoundingBox;
+                                        float starX = matchedStar.Star.Position.X, starY = matchedStar.Star.Position.Y;
+                                        var xLength = Math.Max(1.0f, Math.Min(starX - boundingBox.Left, boundingBox.Right - starX)) / 2.0f;
+                                        var yLength = Math.Max(1.0f, Math.Min(starY - boundingBox.Top, boundingBox.Bottom - starY)) / 2.0f;
+                                        graphics.DrawLine(
+                                            starCenterPen, starX - xLength, starY, starX + xLength, starY);
+                                        graphics.DrawLine(
+                                            starCenterPen, starX, starY - yLength, starX, starY + yLength);
+                                        graphics.DrawString(starIdx.ToString(), annotationFont, annotationBrush, new PointF(matchedStar.Star.Position.X, matchedStar.Star.Position.Y - yLength));
+                                        break;
+                                    }
+                                }
+                            }
+
+                            var img = ImageUtility.ConvertBitmap(newBitmap, PixelFormats.Bgr24);
+                            img.Freeze();
+
+                            var filename = $"Registered_Index{outputIndexMap[i]:00}_Focuser{detectedStars.FocuserPosition}.png";
+                            var targetPath = Path.Combine(saveFolder, filename);
+                            using (var fileStream = new FileStream(targetPath, FileMode.Create)) {
+                                BitmapEncoder encoder = new PngBitmapEncoder();
+                                encoder.Frames.Add(BitmapFrame.Create(img));
+                                encoder.Save(fileStream);
+                            }
+                            Logger.Info($"Saved registered image {filename}");
+                        }
+                    }
+                } finally {
+                    foreach (var p in pens) {
+                        p.Dispose();
+                    }
+                    foreach (var b in brushes) {
+                        b.Dispose();
+                    }
+                    annotationFont.Dispose();
+                }
+            })));
         }
 
         private Task<bool> TakeAndAnalyzeExposure(IAutoFocusEngine autoFocusEngine, CancellationToken token) {
@@ -573,6 +676,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             if (inspectorOptions.DetailedAnalysisExposureSeconds > 0) {
                 options.OverrideAutoFocusExposureTime = TimeSpan.FromSeconds(inspectorOptions.DetailedAnalysisExposureSeconds);
             }
+            if (options.Save) {
+                options.PreserveExposures = true;
+            }
             return options;
         }
 
@@ -648,7 +754,11 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     return false;
                 }
 
-                var autoFocusAnalysisResult = await AnalyzeAutoFocusResult(result, sensorCurveModelEnabled: sensorCurveModelEnabled, ct: localAnalyzeCts.Token);
+                var autoFocusAnalysisResult = await AnalyzeAutoFocusResult(
+                    options,
+                    result,
+                    sensorCurveModelEnabled: sensorCurveModelEnabled,
+                    ct: localAnalyzeCts.Token);
                 if (!autoFocusAnalysisResult) {
                     Notification.ShowError("AutoFocus Analysis Failed");
                     InspectorErrorText = "AutoFocus Analysis Failed";
@@ -757,7 +867,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             if (e.RegionIndex == 6) {
                 var hfStarDetectionResult = e.StarDetectionResult as HocusFocusStarDetectionResult;
                 if (hfStarDetectionResult != null) {
-                    FullSensorDetectedStars.Add(new SensorDetectedStars(e.FocuserPosition, hfStarDetectionResult));
+                    FullSensorDetectedStars.Add(new SensorDetectedStars(e.FocuserPosition, hfStarDetectionResult, e.Image));
                 }
             }
         }

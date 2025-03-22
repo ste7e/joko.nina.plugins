@@ -14,7 +14,7 @@ using NINA.Core.Enum;
 using NINA.Core.Model;
 using NINA.Core.Model.Equipment;
 using NINA.Image.ImageAnalysis;
-using NINA.Joko.Plugins.HocusFocus.StarDetection;
+using NINA.Image.Interfaces;
 using NINA.WPF.Base.Utility.AutoFocus;
 using NINA.WPF.Base.ViewModel.AutoFocus;
 using System;
@@ -67,6 +67,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         public double OutlierRejectionConfidence { get; set; }
         public bool UnevenHyperbolicFitEnabled { get; set; }
         public bool WeightedHyperbolicFitEnabled { get; set; }
+        public bool PreserveExposures { get; set; }
     }
 
     public interface IAutoFocusEngine {
@@ -170,6 +171,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
 
         public DrawingSize ImageSize { get; set; }
         public AutoFocusRegionResult[] RegionResults { get; set; }
+        public String SaveFolder { get; set; }
     }
 
     public class AutoFocusInitialHFRCalculatedEventArgs : EventArgs {
@@ -197,6 +199,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         public int RegionIndex { get; set; }
         public StarDetectionRegion Region { get; set; }
         public StarDetectionResult StarDetectionResult { get; set; }
+        public IRenderedImage Image { get; set; }
     }
 
     public class AutoFocusRegionHFR {

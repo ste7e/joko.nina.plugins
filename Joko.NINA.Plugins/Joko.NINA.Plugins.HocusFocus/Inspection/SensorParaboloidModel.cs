@@ -10,10 +10,10 @@
 
 #endregion "copyright"
 
-using NINA.Core.Utility;
 using NINA.Joko.Plugins.HocusFocus.Utility;
 using System;
 using System.Collections.Generic;
+using static NINA.Joko.Plugins.HocusFocus.Inspection.SensorModel;
 
 namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
@@ -42,6 +42,17 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
         public override string ToString() {
             return $"{{{nameof(X)}={X.ToString()}, {nameof(Y)}={Y.ToString()}, {nameof(FocuserPosition)}={FocuserPosition.ToString()}, {nameof(RSquared)}={RSquared.ToString()}}}";
         }
+    }
+
+    public class RegistrationAndFitResult {
+
+        public RegistrationAndFitResult(List<SensorParaboloidDataPoint> points, RegisteredStar[] registeredStars) {
+            this.Points = points;
+            this.RegisteredStars = registeredStars;
+        }
+
+        public List<SensorParaboloidDataPoint> Points { get; private set; }
+        public RegisteredStar[] RegisteredStars { get; private set; }
     }
 
     public class SensorParaboloidModel : INonLinearLeastSquaresParameters {

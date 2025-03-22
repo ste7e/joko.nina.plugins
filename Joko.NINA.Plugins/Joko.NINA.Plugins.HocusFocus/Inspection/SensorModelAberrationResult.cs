@@ -140,6 +140,16 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             }
         }
 
+        private SensorModel.RegisteredStar[] registeredStars = Array.Empty<SensorModel.RegisteredStar>();
+
+        public SensorModel.RegisteredStar[] RegisteredStars {
+            get => registeredStars;
+            private set {
+                registeredStars = value;
+                RaisePropertyChanged();
+            }
+        }
+
         private DrawingSize imageSize = DrawingSize.Empty;
 
         public DrawingSize ImageSize {
@@ -224,7 +234,14 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             }
         }
 
-        public void Update(SensorParaboloidModel sensorModel, DrawingSize imageSize, double pixelSizeMicrons, double fRatio, double focuserStepSizeMicrons, double finalFocusPosition) {
+        public void Update(
+            SensorParaboloidModel sensorModel,
+            DrawingSize imageSize,
+            double pixelSizeMicrons,
+            double fRatio,
+            double focuserStepSizeMicrons,
+            double finalFocusPosition,
+            SensorModel.RegisteredStar[] registeredStars) {
             ImageSize = imageSize;
             FRatio = fRatio;
             PixelSizeMicrons = pixelSizeMicrons;
@@ -233,6 +250,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             CenterOffsetXMicrons = sensorModel.X0;
             CenterOffsetYMicrons = sensorModel.Y0;
             CurvatureRadiusMillimeters = 1.0 / (2.0 * sensorModel.C * sensorModel.C * 1000.0);
+            RegisteredStars = registeredStars;
 
             var sensorWidthMicrons = imageSize.Width * pixelSizeMicrons;
             var sensorHeightMicrons = imageSize.Height * pixelSizeMicrons;
