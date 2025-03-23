@@ -326,16 +326,31 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 }).ToArray();
                 stopwatch.RecordEntry("build trees");
 
+                int minHfrIndex = 0;
+                double minHfr = allDetectedStars[0].StarDetectionResult.AverageHFR;
+                for (int i = 1; i < allDetectedStars.Count; ++i) {
+                    double nextHfr = allDetectedStars[i].StarDetectionResult.AverageHFR;
+                    if (nextHfr < minHfr) {
+                        minHfrIndex = i;
+                        minHfr = nextHfr;
+                    }
+                }
+
                 const float searchRadius = 30;
                 var globalRegistry = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
                 var starIndexMap = Enumerable.Range(0, allDetectedStars.Count).Select(i => new Dictionary<int, int>()).ToArray();
-                foreach (var starNode in allDetectedStarTrees[0]) {
+                foreach (var starNode in allDetectedStarTrees[minHfrIndex]) {
                     var nextIndex = globalRegistry.Count;
                     globalRegistry.Add(starNode.Point, new DetectedStarIndex(nextIndex, starNode.Value.DetectedStar));
-                    starIndexMap[0].Add(starNode.Value.Index, nextIndex);
+                    starIndexMap[minHfrIndex].Add(starNode.Value.Index, nextIndex);
                 }
 
-                for (int i = 1; i < allDetectedStars.Count; ++i) {
+                float[] pointDiff = new float[2];
+                for (int i = 0; i < allDetectedStars.Count; ++i) {
+                    if (i == minHfrIndex) {
+                        continue;
+                    }
+
                     var nextStarList = allDetectedStars[i].StarDetectionResult.StarList;
                     var nextStarTree = allDetectedStarTrees[i];
                     var nextStarIndexMap = starIndexMap[i];
@@ -349,7 +364,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         var globalNeighbors = globalRegistry.RadialSearch(sourcePoint, searchRadius);
                         foreach (var globalNeighbor in globalNeighbors) {
                             var globalNeighborIndex = globalNeighbor.Value.Index;
-                            var distance = MathUtility.DotProduct(globalNeighbor.Point, sourcePoint);
+                            pointDiff[0] = globalNeighbor.Point[0] - sourcePoint[0];
+                            pointDiff[1] = globalNeighbor.Point[1] - sourcePoint[1];
+                            var distance = MathUtility.DotProduct(pointDiff, pointDiff);
                             queue.Enqueue(new MatchingPair() { SourceIndex = sourceIndex, GlobalIndex = globalNeighborIndex }, distance);
                         }
                     }
@@ -363,18 +380,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         nextStarIndexMap.Add(nextCandidate.SourceIndex, nextCandidate.GlobalIndex);
                         matchedGlobalStars[nextCandidate.GlobalIndex] = true;
                         matchedSourceStars[nextCandidate.SourceIndex] = true;
-                    }
-
-                    for (int j = 0; j < matchedSourceStars.Length; ++j) {
-                        if (matchedSourceStars[j]) {
-                            continue;
-                        }
-
-                        // Now we've found a star that didn't match in the global registry. Add it to the registry for future matches
-                        var star = nextStarList[j];
-                        var nextGlobalIndex = globalRegistry.Count;
-                        globalRegistry.Add(new[] { star.Position.X, star.Position.Y }, new DetectedStarIndex(nextGlobalIndex, (HocusFocusDetectedStar)star));
-                        nextStarIndexMap.Add(j, nextGlobalIndex);
                     }
                 }
 
