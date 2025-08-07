@@ -926,8 +926,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             FilterInfo imagingFilter,
             List<StarDetectionRegion> regions,
             CancellationToken token,
-            IProgress<ApplicationStatus> progress) {
-            var autofocusFilter = await SetAutofocusFilter(imagingFilter, token, progress);
+            IProgress<ApplicationStatus> progress, bool forRerun = false) {
+            var autofocusFilter = forRerun ? imagingFilter : await SetAutofocusFilter(imagingFilter, token, progress);
             return new AutoFocusState(
                 options,
                 autofocusFilter,
@@ -1374,7 +1374,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         private async Task<AutoFocusResult> RerunImpl(AutoFocusEngineOptions options, SavedAutoFocusAttempt savedAttempt, FilterInfo imagingFilter, List<StarDetectionRegion> regions, CancellationToken token, IProgress<ApplicationStatus> progress) {
             OnStarted();
 
-            var state = await InitializeState(options, imagingFilter, regions, token, progress);
+            var state = await InitializeState(options, imagingFilter, regions, token, progress, true);
             InitializeSave(state);
 
             state.OnNextAttempt();
