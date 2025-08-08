@@ -1395,14 +1395,14 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             });
 
             try {
-                var framesPerPoint = savedFiles.Max(f => f.FrameNumber);
+                var framesPerPoint = savedFiles.Max(f => f.FrameNumber)+1;
                 state.Options.FramesPerPoint = framesPerPoint;
                 foreach (var focuserPositionGroup in savedFiles.GroupBy(f => f.FocuserPosition)) {
                     var focuserPosition = focuserPositionGroup.Key;
 
                     // Previous versions mistakenly saved the initial image in the attempt folder, which led to duplicate key exceptions
-                    var imageNumber = focuserPositionGroup.Max(g => g.ImageNumber);
-                    var files = focuserPositionGroup.Where(g => g.ImageNumber == imageNumber).OrderBy(g => g.FrameNumber).ToList();
+                    //var imageNumber = focuserPositionGroup.Max(g => g.ImageNumber);
+                    var files = focuserPositionGroup./*Where(g => g.ImageNumber == imageNumber).*/OrderBy(g => g.FrameNumber).ToList();
                     var allMeasurementTasks = new List<Task>();
                     foreach (var savedFile in files) {
                         var imageState = await state.OnNextImage(savedFile.FrameNumber, savedFile.FocuserPosition, false, token);
@@ -1598,7 +1598,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 HFRImprovementThreshold = autoFocusOptions.HFRImprovementThreshold,
                 AutoFocusTimeout = TimeSpan.FromSeconds(autoFocusOptions.AutoFocusTimeoutSeconds),
                 AutoFocusInitialOffsetSteps = profileService.ActiveProfile.FocuserSettings.AutoFocusInitialOffsetSteps,
-                AutoFocusStepSize = savedAttempt?.StepSize ?? profileService.ActiveProfile.FocuserSettings.AutoFocusStepSize,
+                AutoFocusStepSize = (savedAttempt?.StepSize>0) ? savedAttempt.StepSize.Value : profileService.ActiveProfile.FocuserSettings.AutoFocusStepSize,
                 FocuserOffset = autoFocusOptions.FocuserOffset,
                 MaxOutlierRejections = autoFocusOptions.MaxOutlierRejections,
                 OutlierRejectionConfidence = autoFocusOptions.OutlierRejectionConfidence,
