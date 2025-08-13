@@ -20,6 +20,16 @@ using System;
 namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
     public class SensorModelAberrationResult : BaseINPC {
+        private double ransacThreshold;
+
+        public double RANSACThreshold {
+            get => ransacThreshold;
+            set {
+                ransacThreshold = value;
+                RaisePropertyChanged();
+            }
+        }
+
         private Angle tilt = Angle.Zero;
 
         public Angle Tilt {

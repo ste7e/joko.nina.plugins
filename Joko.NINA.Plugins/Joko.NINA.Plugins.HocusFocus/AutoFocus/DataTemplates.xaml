@@ -2537,7 +2537,20 @@
                                 ToolTip="{StaticResource SensorModel_CriticalFocus_Tooltip}">
                                 <Run Text="{Binding SensorModel.SensorModelResult.CriticalFocusMicrons, StringFormat=\{0:0.0\}, Mode=OneWay}" /> <Run Text="microns" />
                             </TextBlock>
-                        </Grid>
+                            <TextBlock
+                                Grid.Row="4"
+                                Grid.Column="2"
+                                Margin="5"
+                                VerticalAlignment="Center"
+                                Text="RANSAC threshold" />
+                            <TextBlock
+                                Grid.Row="4"
+                                Grid.Column="3"
+                                Margin="5"
+                                VerticalAlignment="Center">
+                                <Run Text="{Binding SensorModel.SensorModelResult.RANSACThreshold, StringFormat=\{0:0.00000\}, Mode=OneWay}" /> <Run Text="" />
+                            </TextBlock>
+                                                    </Grid>
                         <Grid
                             Grid.Row="3"
                             Grid.Column="0"

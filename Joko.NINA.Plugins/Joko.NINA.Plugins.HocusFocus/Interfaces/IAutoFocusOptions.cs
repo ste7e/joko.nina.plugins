@@ -24,6 +24,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         double HFRImprovementThreshold { get; set; }
         int AutoFocusTimeoutSeconds { get; set; }
         string SavePath { get; set; }
+        bool UseRANSAC { get; set; }
         bool Save { get; set; }
         string LastSelectedLoadPath { get; set; }
         int FocuserOffset { get; set; }

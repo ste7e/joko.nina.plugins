@@ -1618,8 +1618,28 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         public SavedAutoFocusAttempt LoadSavedAutoFocusAttempt(string path) {
             var attemptFolder = new DirectoryInfo(path);
             var attemptMatch = ATTEMPT_REGEX.Match(attemptFolder.Name);
-            if (!attemptMatch.Success || !int.TryParse(attemptMatch.Groups["ATTEMPT"].Value, out var attemptNumber)) {
-                throw new Exception("A folder named attemptXX must be selected");
+            var attemptNumber = 0;
+            if (!attemptMatch.Success || !int.TryParse(attemptMatch.Groups["ATTEMPT"].Value, out attemptNumber)) {
+                if (attemptFolder.Exists)
+                {
+                    var subFolders = attemptFolder.EnumerateDirectories("attempt*");
+                    if (subFolders.Count()==1)
+                    {
+                        attemptMatch = ATTEMPT_REGEX.Match(subFolders.FirstOrDefault().Name);
+                        if (!attemptMatch.Success || (!int.TryParse(attemptMatch.Groups["ATTEMPT"].Value, out attemptNumber)))
+                        {
+                            throw new Exception("A folder named attemptXX must be selected");
+                        }
+                        else
+                        {
+                            attemptFolder = subFolders.FirstOrDefault();
+                        }
+                    }
+                    if (!attemptMatch.Success)
+                        throw new Exception("A folder named attemptXX must be selected");
+                }
+                else
+                    throw new Exception("A folder named attemptXX must be selected");
             }
             return LoadSavedAttemptImpl(attemptFolder, attemptNumber, 3);
         }

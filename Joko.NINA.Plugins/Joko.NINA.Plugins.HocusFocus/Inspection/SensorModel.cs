@@ -23,6 +23,7 @@ using NINA.Profile.Interfaces;
 using OxyPlot.Series;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -121,45 +122,63 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 var imageSize = firstStarDetectionResult.ImageSize;
                 var pixelSize = firstStarDetectionResult.PixelSize;
                 Logger.Info($"Building Sensor Model. FRatio ({fRatio}), Focuser Size ({focuserSizeMicrons}), Pixel Size ({pixelSize}), Image size ({imageSize})");
-                var fitResult = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize, stepSize: stepSize);
-                var dataPoints = fitResult.Points;
-                if (dataPoints.Count < 9) {
-                    throw new Exception($"Need at least 9 registered stars. Found {dataPoints.Count}");
+
+                double bestThreshold = 0.0d;
+                double minThreshold = 1.0;
+                double maxThreshold = 1.6;
+                double thresholdStep = 0.1;
+                SensorParaboloidModel bestSolution = null;
+                RegistrationAndFitResult bestFit = null;
+
+                for (double RANSACthreshold = minThreshold; RANSACthreshold <= maxThreshold; RANSACthreshold += thresholdStep) {
+                    var fitResult = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize, stepSize: stepSize,
+                        useRANSAC: autoFocusOptions.UseRANSAC, RANSACthreshold: RANSACthreshold);
+                    var dataPoints = fitResult.Points;
+                    if (dataPoints.Count < 9) {
+                        throw new Exception($"Need at least 9 registered stars. Found {dataPoints.Count}");
+                    }
+
+                    var sensorModelSolver = new SensorParaboloidSolver(
+                        dataPoints: dataPoints,
+                        sensorSizeMicronsX: imageSize.Width * pixelSize,
+                        sensorSizeMicronsY: imageSize.Height * pixelSize,
+                        inFocusMicrons: finalFocusPosition * focuserSizeMicrons,
+                        fixedSensorCenter: inspectorOptions.FixedSensorCenter);
+                    var nlSolver = new NonLinearLeastSquaresSolver<SensorParaboloidSolver, SensorParaboloidDataPoint, SensorParaboloidModel>(this.alglibAPI);
+                    sensorModelSolver.PositiveCurvature = true;
+                    var positiveCurvatureSolution = nlSolver.SolveWinsorizedResiduals(sensorModelSolver, ct: ct);
+                    ct.ThrowIfCancellationRequested();
+                    positiveCurvatureSolution.EvaluateFit(nlSolver, sensorModelSolver);
+
+                    sensorModelSolver.PositiveCurvature = false;
+                    var negativeCurvatureSolution = nlSolver.SolveWinsorizedResiduals(sensorModelSolver, ct: ct);
+                    ct.ThrowIfCancellationRequested();
+                    negativeCurvatureSolution.EvaluateFit(nlSolver, sensorModelSolver);
+
+                    var solution = positiveCurvatureSolution.RMSErrorMicrons < negativeCurvatureSolution.RMSErrorMicrons ? positiveCurvatureSolution : negativeCurvatureSolution;
+                    Logger.Info($"Solved surface model: {solution}. RMS = {solution.RMSErrorMicrons:0.0000}, GoD: {solution.GoodnessOfFit:0.0000}, Stars: {solution.StarsInModel}");
+
+                    if ((bestSolution == null) || (solution.GoodnessOfFit > bestSolution.GoodnessOfFit)) {
+                        bestSolution = solution;
+                        bestThreshold = RANSACthreshold;
+                        bestFit = fitResult;
+                    }
+                }
+                if (bestSolution.GoodnessOfFit < 0.05) {
+                    throw new Exception($"Sensor modeling failed. R² = {bestSolution.GoodnessOfFit:#.00}");
                 }
 
-                var sensorModelSolver = new SensorParaboloidSolver(
-                    dataPoints: dataPoints,
-                    sensorSizeMicronsX: imageSize.Width * pixelSize,
-                    sensorSizeMicronsY: imageSize.Height * pixelSize,
-                    inFocusMicrons: finalFocusPosition * focuserSizeMicrons,
-                    fixedSensorCenter: inspectorOptions.FixedSensorCenter);
-                var nlSolver = new NonLinearLeastSquaresSolver<SensorParaboloidSolver, SensorParaboloidDataPoint, SensorParaboloidModel>(this.alglibAPI);
-                sensorModelSolver.PositiveCurvature = true;
-                var positiveCurvatureSolution = nlSolver.SolveWinsorizedResiduals(sensorModelSolver, ct: ct);
-                ct.ThrowIfCancellationRequested();
-                positiveCurvatureSolution.EvaluateFit(nlSolver, sensorModelSolver);
-
-                sensorModelSolver.PositiveCurvature = false;
-                var negativeCurvatureSolution = nlSolver.SolveWinsorizedResiduals(sensorModelSolver, ct: ct);
-                ct.ThrowIfCancellationRequested();
-                negativeCurvatureSolution.EvaluateFit(nlSolver, sensorModelSolver);
-
-                var solution = positiveCurvatureSolution.RMSErrorMicrons < negativeCurvatureSolution.RMSErrorMicrons ? positiveCurvatureSolution : negativeCurvatureSolution;
-                Logger.Info($"Solved surface model: {solution}. RMS = {solution.RMSErrorMicrons:0.0000}, GoD: {solution.GoodnessOfFit:0.0000}, Stars: {solution.StarsInModel}");
-
-                if (solution.GoodnessOfFit < 0.05) {
-                    throw new Exception($"Sensor modeling failed. R² = {solution.GoodnessOfFit:#.00}");
-                }
-
-                DisplayedSensorModel = solution;
+                DisplayedSensorModel = bestSolution;
                 SensorModelResult.Update(
-                    solution,
+                    bestSolution,
                     imageSize,
                     pixelSizeMicrons: pixelSize,
                     fRatio: fRatio,
                     focuserStepSizeMicrons: focuserSizeMicrons,
                     finalFocusPosition: finalFocusPosition,
-                    registeredStars: fitResult.RegisteredStars);
+                    registeredStars: bestFit.RegisteredStars);
+
+                SensorModelResult.RANSACThreshold = bestThreshold;
 
                 var historyId = Interlocked.Increment(ref nextHistoryId);
                 SensorTiltHistoryModels.Insert(0, new SensorParaboloidTiltHistoryModel(
@@ -169,7 +188,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     imageSize: imageSize,
                     focuserSizeMicrons: focuserSizeMicrons,
                     finalFocusPosition: finalFocusPosition,
-                    sensorModel: solution,
+                    sensorModel: bestSolution,
                     tiltEffectMicrons: SensorModelResult.TiltEffectMicrons,
                     curvatureEffectMicrons: SensorModelResult.CurvatureEffectMicrons,
                     autoFocusOffset: SensorModelResult.AutoFocusMeanOffset,
@@ -315,7 +334,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             System.Drawing.Size imageSize,
             double focuserSizeMicrons,
             double pixelSize,
-            int stepSize) {
+            int stepSize,
+            bool useRANSAC,
+            double RANSACthreshold) {
             using (var stopwatch = MultiStopWatch.Measure()) {
                 var allDetectedStarTrees = allDetectedStars.Select(result => {
                     var tree = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
@@ -336,7 +357,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     }
                 }
 
-                const float searchRadius = 30;
+                float searchRadius = useRANSAC ? 100 : 30;
                 var globalRegistry = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
                 var starIndexMap = Enumerable.Range(0, allDetectedStars.Count).Select(i => new Dictionary<int, int>()).ToArray();
                 foreach (var starNode in allDetectedStarTrees[minHfrIndex]) {
@@ -396,6 +417,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     var nextStarIndexMap = starIndexMap[i];
                     var focuserPosition = allDetectedStars[i].FocuserPosition;
                     var detectedStars = allDetectedStars[i].StarDetectionResult.StarList;
+
                     foreach (var nextKvp in nextStarIndexMap) {
                         var sourceIndex = nextKvp.Key;
                         var globalIndex = nextKvp.Value;
@@ -408,51 +430,20 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         registeredStars[globalIndex].MatchedStars.Add(matchedStar);
                     }
                 }
+
+                List<SensorParaboloidDataPoint> sensorModelDataPoints = null;
+
+                // RANSAC phase
+                if (useRANSAC) {
+                    IEnumerable<RegisteredStar> RANSACedstars = null;
+                    RANSACedstars = ApplyRANSACToRegisteredStars(registeredStars, RANSACthreshold);
+
+                    sensorModelDataPoints = FitCurves(imageSize, focuserSizeMicrons, pixelSize, stepSize, stopwatch, RANSACedstars.ToArray());
+                } else {
+                    sensorModelDataPoints = FitCurves(imageSize, focuserSizeMicrons, pixelSize, stepSize, stopwatch, registeredStars);
+                }
+
                 stopwatch.RecordEntry("registration");
-
-                int discardedStarCount = 0;
-                var sensorModelDataPoints = new List<SensorParaboloidDataPoint>();
-                foreach (var registeredStar in registeredStars) {
-                    if (registeredStar.MatchedStars.Count < 5) {
-                        continue;
-                    }
-
-                    try {
-                        var points = registeredStar.MatchedStars.Select(s => new ScatterErrorPoint(s.FocuserPosition, s.Star.HFR, 0.0d, 0.0d)).ToList();
-                        AlglibHyperbolicFitting fitting;
-                        if (autoFocusOptions.UnevenHyperbolicFitEnabled) {
-                            fitting = HyperbolicUnevenFittingAlglib.Create(this.alglibAPI, points, stepSize, autoFocusOptions.WeightedHyperbolicFitEnabled);
-                        } else {
-                            fitting = HyperbolicFittingAlglib.Create(this.alglibAPI, points, autoFocusOptions.WeightedHyperbolicFitEnabled);
-                        }
-
-                        var solveResult = fitting.Solve();
-                        if (!solveResult) {
-                            Logger.Trace($"Failed to fit hyperbolic curve to star matches at ({registeredStar.RegistrationX:0.00}, {registeredStar.RegistrationY:0.00})");
-                            discardedStarCount++;
-                            continue;
-                        }
-
-                        if (fitting.RSquared < 0.90) {
-                            // Discard bad fitting
-                            discardedStarCount++;
-                            continue;
-                        }
-
-                        var dataPointX = (registeredStar.RegistrationX - (imageSize.Width / 2.0)) * pixelSize;
-                        var dataPointY = (registeredStar.RegistrationY - (imageSize.Height / 2.0)) * pixelSize;
-                        var focuserMicrons = fitting.Minimum.X * focuserSizeMicrons;
-                        var dataPoint = new SensorParaboloidDataPoint(dataPointX, dataPointY, focuserMicrons, fitting.RSquared);
-                        sensorModelDataPoints.Add(dataPoint);
-                    } catch (Exception e) {
-                        Logger.Error(e, $"Failed to calculate hyperbolic at ({registeredStar.RegistrationX}, {registeredStar.RegistrationY}). Error={e.Message}");
-                    }
-                }
-
-                stopwatch.RecordEntry("fitcurves");
-                if (discardedStarCount > 0) {
-                    Logger.Warning($"Discarded {discardedStarCount} stars during sensor modeling due to poor fits");
-                }
 
                 if (this.inspectorOptions.InterpolationEnabled && sensorModelDataPoints.Count > 5) {
                     return new RegistrationAndFitResult(ToInterpolatedGrid(sensorModelDataPoints, imageSize), registeredStars);
@@ -460,6 +451,126 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     return new RegistrationAndFitResult(sensorModelDataPoints, registeredStars);
                 }
             }
+        }
+
+        private IEnumerable<RegisteredStar> ApplyRANSACToRegisteredStars(RegisteredStar[] registeredStars, double threshold) {
+            int discardedStarCountByRANSAC = 0;
+
+            Dictionary<RegisteredStar, List<MatchedStar>> failedRansacStars = new();
+            failedRansacStars = new();
+            List<RegisteredStar> RANSACedStars = new();
+            foreach (var registeredStar in registeredStars.Where(rs => rs.MatchedStars.Count > 8)) {
+                var putativeMatches = registeredStar.MatchedStars;
+
+                var ransacMatches = RANSACDetectedStars(putativeMatches, threshold);
+
+                if (ransacMatches == null) {
+                    Trace.WriteLine($"RANSAC found no matches for star at ({registeredStar.RegistrationX:0.00}, {registeredStar.RegistrationY:0.00}). Skipping registration.");
+                    Logger.Warning($"RANSAC found no matches for star at ({registeredStar.RegistrationX:0.00}, {registeredStar.RegistrationY:0.00}). Skipping registration.");
+                    discardedStarCountByRANSAC += putativeMatches.Count;
+                    putativeMatches.Clear();
+                    continue;
+                }
+                if (ransacMatches.Count < 5) {
+                    Trace.WriteLine($"RANSAC found only {ransacMatches.Count} matches for star at ({registeredStar.RegistrationX:0.00}, {registeredStar.RegistrationY:0.00}). Skipping registration.");
+                    Logger.Warning($"RANSAC found only {ransacMatches.Count} matches for star at ({registeredStar.RegistrationX:0.00}, {registeredStar.RegistrationY:0.00}). Skipping registration.");
+                }
+
+                /*                if (ransacMatches.Count < putativeMatches.Count)
+                                {
+                                    Trace.WriteLine($"RANSAC reduced matches from {putativeMatches.Count} to {ransacMatches.Count}");
+                                    discardedStarCountByRANSAC += (putativeMatches.Count - ransacMatches.Count);
+                                    putativeMatches.Where(pm => !ransacMatches.Contains(pm.Star))
+                                        .ToList()
+                                        .ForEach(rs =>
+                                        {
+                                            if (!failedRansacStars.ContainsKey(registeredStar))
+                                                failedRansacStars.Add(registeredStar, new List<MatchedStar>());
+                                            failedRansacStars[registeredStar].Add(rs);
+                                        });
+                                }
+                */
+                RegisteredStar newRegisteredStar = new RegisteredStar() { RegistrationX = registeredStar.RegistrationX, RegistrationY = registeredStar.RegistrationY };
+                foreach (MatchedStar matchedStar in ransacMatches)
+                    newRegisteredStar.MatchedStars.Add(new MatchedStar() { Star = matchedStar.Star, FocuserPosition = matchedStar.FocuserPosition, ImageIndex = matchedStar.ImageIndex });
+                RANSACedStars.Add(newRegisteredStar);
+            }
+
+            return RANSACedStars;
+        }
+
+        private List<SensorParaboloidDataPoint> FitCurves(System.Drawing.Size imageSize, double focuserSizeMicrons, double pixelSize, int stepSize, MultiStopWatch stopwatch, RegisteredStar[] registeredStars) {
+            int discardedStarCount = 0;
+            var sensorModelDataPoints = new List<SensorParaboloidDataPoint>();
+            foreach (var registeredStar in registeredStars) {
+                if (registeredStar.MatchedStars.Count < 5) {
+                    continue;
+                }
+
+                try {
+                    var points = registeredStar.MatchedStars.Select(s => new ScatterErrorPoint(s.FocuserPosition, s.Star.HFR, 0.0d, 0.0d)).ToList();
+                    AlglibHyperbolicFitting fitting;
+                    if (autoFocusOptions.UnevenHyperbolicFitEnabled) {
+                        fitting = HyperbolicUnevenFittingAlglib.Create(this.alglibAPI, points, stepSize, autoFocusOptions.WeightedHyperbolicFitEnabled);
+                    } else {
+                        fitting = HyperbolicFittingAlglib.Create(this.alglibAPI, points, autoFocusOptions.WeightedHyperbolicFitEnabled);
+                    }
+
+                    var solveResult = fitting.Solve();
+                    if (!solveResult) {
+                        Logger.Trace($"Failed to fit hyperbolic curve to star matches at ({registeredStar.RegistrationX:0.00}, {registeredStar.RegistrationY:0.00})");
+                        discardedStarCount++;
+                        continue;
+                    }
+
+                    if (fitting.RSquared < 0.90) {
+                        // Discard bad fitting
+                        discardedStarCount++;
+                        continue;
+                    }
+
+                    var dataPointX = (registeredStar.RegistrationX - (imageSize.Width / 2.0)) * pixelSize;
+                    var dataPointY = (registeredStar.RegistrationY - (imageSize.Height / 2.0)) * pixelSize;
+                    var focuserMicrons = fitting.Minimum.X * focuserSizeMicrons;
+                    var dataPoint = new SensorParaboloidDataPoint(dataPointX, dataPointY, focuserMicrons, fitting.RSquared);
+                    sensorModelDataPoints.Add(dataPoint);
+                } catch (Exception e) {
+                    Logger.Error(e, $"Failed to calculate hyperbolic at ({registeredStar.RegistrationX}, {registeredStar.RegistrationY}). Error={e.Message}");
+                }
+            }
+
+            stopwatch.RecordEntry("fitcurves");
+            if (discardedStarCount > 0) {
+                Logger.Warning($"Discarded {discardedStarCount} stars during sensor modeling due to poor fits");
+            }
+
+            return sensorModelDataPoints;
+        }
+
+        private bool debugRANSAC = false;
+
+        private List<MatchedStar> RANSACDetectedStars(List<MatchedStar> starList, double threshold) {
+            bool debug = debugRANSAC;
+            if (debug) {
+                Trace.WriteLine("RANSAC on matched stars: ");
+                for (int i = 0; i < starList.Count; i++)
+                    Trace.WriteLine($"{i}, {starList[i].Star.Position.X}, {starList[i].Star.Position.Y}");
+            }
+            (var indices, var fit) = RansacLineFitting.Ransac(starList.Select(s => (s.Star.Position.X, s.Star.Position.Y)).ToList(), threshold, 3);
+            if (indices == null || indices.Count == 0) {
+                //throw new Exception("RANSAC failed to find any registered stars");
+                return null;
+            }
+
+            var detectedStars = new List<MatchedStar>(indices.Count);
+            if (debug)
+                Trace.WriteLine("RANSAC Result:");
+            for (int i = 0; i < indices.Count; i++) {
+                if (debug)
+                    Trace.WriteLine($"{i}, {starList[indices[i]].Star.Position.X}, {starList[indices[i]].Star.Position.Y}, {fit[i]}");
+                detectedStars.Add(starList[indices[i]]);
+            }
+            return detectedStars;
         }
 
         private void UpdateTiltModels(SensorParaboloidTiltHistoryModel historyModel) {
