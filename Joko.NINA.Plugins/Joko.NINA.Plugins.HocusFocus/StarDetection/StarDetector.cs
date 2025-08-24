@@ -126,7 +126,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                 return result;
             } catch (TypeInitializationException e) {
                 Logger.Error(e, "TypeInitialization exception while performing star detection. This indicates the OpenCV library couldn't be loaded. If you have a Windows N SKU, install the Media Pack");
-                Notification.ShowError("Could ont load the OpenCV library. If you have a Windows N SKU, install the Media Pack");
+                Notification.ShowError("Could not load the OpenCV library. If you have a Windows N SKU, install the Media Pack");
                 throw;
             } finally {
                 // Cleanup

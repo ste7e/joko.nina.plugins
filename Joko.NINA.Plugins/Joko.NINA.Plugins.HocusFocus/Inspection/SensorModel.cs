@@ -130,9 +130,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 SensorParaboloidModel bestSolution = null;
                 RegistrationAndFitResult bestFit = null;
 
-                for (double RANSACthreshold = minThreshold; RANSACthreshold <= maxThreshold; RANSACthreshold += thresholdStep) {
-                    var fitResult = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize, stepSize: stepSize,
-                        useRANSAC: autoFocusOptions.UseRANSAC, RANSACthreshold: RANSACthreshold);
+                /*for (double RANSACthreshold = minThreshold; RANSACthreshold <= maxThreshold; RANSACthreshold += thresholdStep)*/
+                {
+                    var fitResult = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize, stepSize: stepSize);
                     var dataPoints = fitResult.Points;
                     if (dataPoints.Count < 9) {
                         throw new Exception($"Need at least 9 registered stars. Found {dataPoints.Count}");
@@ -160,7 +160,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
                     if ((bestSolution == null) || (solution.GoodnessOfFit > bestSolution.GoodnessOfFit)) {
                         bestSolution = solution;
-                        bestThreshold = RANSACthreshold;
                         bestFit = fitResult;
                     }
                 }
@@ -334,10 +333,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             System.Drawing.Size imageSize,
             double focuserSizeMicrons,
             double pixelSize,
-            int stepSize,
-            bool useRANSAC,
-            double RANSACthreshold) {
+            int stepSize) {
             using (var stopwatch = MultiStopWatch.Measure()) {
+                // registration phase
+
                 var allDetectedStarTrees = allDetectedStars.Select(result => {
                     var tree = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
                     foreach (var (star, starIndex) in result.StarDetectionResult.StarList.Select((star, starIndex) => (star, starIndex))) {
@@ -357,7 +356,31 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     }
                 }
 
-                float searchRadius = useRANSAC ? 100 : 30;
+                var targetStars = allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Select(s => new Point2D(s.Position.X, s.Position.Y, s.MaxBrightness));
+                for (int i = 1; i < allDetectedStars.Count; ++i) {
+                    if (i == minHfrIndex) {
+                        continue;
+                    }
+                    var theseStars = allDetectedStars[i].StarDetectionResult.StarList.Select(s => new Point2D(s.Position.X, s.Position.Y, s.MaxBrightness));
+                    var (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatches(theseStars.ToList(), targetStars.ToList(),
+                        maxDistance: 100.0d, magnitudeDiffThreshold: 5.0d);
+                    Trace.WriteLine($"Image {i + 1}: Found {putativeSrc.Count} putative matches against reference image {minHfrIndex + 1}");
+                    try {
+                        var transform = RANSACRegistration.EstimateSimilarityTransform(putativeSrc, putativeDst);
+                        Trace.WriteLine($"Scale: {transform.Scale:F4}");
+                        Trace.WriteLine($"Rotation: {transform.Rotation:F4} radians");
+                        Trace.WriteLine($"Translation: ({transform.Tx:F4}, {transform.Ty:F4})");
+
+                        for (int si = 0; si < allDetectedStars[i].StarDetectionResult.StarList.Count; si++) {
+                            var transformedPoint = transform.Transform(new Point2D(allDetectedStars[i].StarDetectionResult.StarList[si].Position));
+                            allDetectedStars[i].StarDetectionResult.StarList[si].Position = new Accord.Point((float)transformedPoint.X, (float)transformedPoint.Y);
+                        }
+                    } catch (Exception ex) {
+                        Trace.WriteLine($"Error: {ex.Message}");
+                    }
+                }
+
+                float searchRadius = 30;
                 var globalRegistry = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
                 var starIndexMap = Enumerable.Range(0, allDetectedStars.Count).Select(i => new Dictionary<int, int>()).ToArray();
                 foreach (var starNode in allDetectedStarTrees[minHfrIndex]) {
@@ -398,7 +421,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                             continue;
                         }
 
-                        nextStarIndexMap.Add(nextCandidate.SourceIndex, nextCandidate.GlobalIndex);
+                        if (nextCandidate.SourceIndex != nextCandidate.GlobalIndex)
+                            nextStarIndexMap.Add(nextCandidate.SourceIndex, nextCandidate.GlobalIndex);
                         matchedGlobalStars[nextCandidate.GlobalIndex] = true;
                         matchedSourceStars[nextCandidate.SourceIndex] = true;
                     }
@@ -431,18 +455,29 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     }
                 }
 
-                List<SensorParaboloidDataPoint> sensorModelDataPoints = null;
+                /*                // use RANSAC to register stars with best HFR as reference
+                                for (int i = 0; i < allDetectedStars.Count; ++i) {
+                                    if (i == minHfrIndex) {
+                                        continue;
+                                    }
+                                    if (allDetectedStars[i].StarDetectionResult.StarList.Count < 8) {
+                                        throw new Exception($"Not enough stars detected in image {i + 1} to perform RANSAC registration. Detected stars: {allDetectedStars[i].StarDetectionResult.StarList.Count}");
+                                    }
+                                    var referenceStars = starIndexMap[i].OrderBy(kvp => kvp.Value).Select(kvp => registeredStars[kvp.Value])
+                                        .Select(s => new Point2D(s.RegistrationX, s.RegistrationY)).ToList();
+                                    var targetStars = starIndexMap[i].OrderBy(kvp => kvp.Value).Select(kvp => registeredStars[kvp.Key])
+                                        .Select(s => new Point2D(s.RegistrationX, s.RegistrationY)).ToList();
+                                    var transform = RansacStarRegistration.EstimateSimilarityTransform(referenceStars,
+                                        starIndexMap[i].Select(kvp => registeredStars[kvp.Value])
+                                                        .Select(s => new Point2D(s.RegistrationX, s.RegistrationY)).ToList());
+                                    Console.WriteLine($"Scale: {transform.Scale:F4}");
+                                    Console.WriteLine($"Rotation: {transform.Rotation:F4} radians");
+                                    Console.WriteLine($"Translation: ({transform.Tx:F4}, {transform.Ty:F4})");
+                                }
+                */
+                List<SensorParaboloidDataPoint> sensorModelDataPoints = sensorModelDataPoints = FitCurves(imageSize, focuserSizeMicrons, pixelSize, stepSize, stopwatch, registeredStars);
 
-                // RANSAC phase
-                if (useRANSAC) {
-                    IEnumerable<RegisteredStar> RANSACedstars = null;
-                    RANSACedstars = ApplyRANSACToRegisteredStars(registeredStars, RANSACthreshold);
-
-                    sensorModelDataPoints = FitCurves(imageSize, focuserSizeMicrons, pixelSize, stepSize, stopwatch, RANSACedstars.ToArray());
-                } else {
-                    sensorModelDataPoints = FitCurves(imageSize, focuserSizeMicrons, pixelSize, stepSize, stopwatch, registeredStars);
-                }
-
+                // registration phase done
                 stopwatch.RecordEntry("registration");
 
                 if (this.inspectorOptions.InterpolationEnabled && sensorModelDataPoints.Count > 5) {
