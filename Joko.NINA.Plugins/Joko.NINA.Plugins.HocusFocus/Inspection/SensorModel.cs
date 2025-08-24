@@ -369,7 +369,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 }).ToArray();
                 stopwatch.RecordEntry("build trees");
 
-                float searchRadius = 30;
+                float searchRadius = autoFocusOptions.UseRANSAC ? 3 : 30;
                 var globalRegistry = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
                 var starIndexMap = Enumerable.Range(0, allDetectedStars.Count).Select(i => new Dictionary<int, int>()).ToArray();
                 foreach (var starNode in allDetectedStarTrees[minHfrIndex]) {
