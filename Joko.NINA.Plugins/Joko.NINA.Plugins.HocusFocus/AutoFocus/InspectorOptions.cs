@@ -56,6 +56,12 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             interpolationAlgo = optionsAccessor.GetValueEnum(nameof(InterpolationAlgo), InterpolationAlgoEnum.MultiQuadric);
             interpolationAmount = optionsAccessor.GetValueEnum(nameof(InterpolationAmount), InterpolationAmountEnum.Medium);
             fixedSensorCenter = optionsAccessor.GetValueBoolean(nameof(FixedSensorCenter), true);
+            previousRunBrightnessDiff = optionsAccessor.GetValueDouble(nameof(PreviousRunBrightnessDiff), 0.1d);
+            startingBrightnessDiff = optionsAccessor.GetValueDouble(nameof(StartingBrightnessDiff), -1);
+            rejectBadBrightnessMatches = optionsAccessor.GetValueBoolean(nameof(RejectBadBrightnessMatches), false);
+            rejectBadlyFittingMatches = optionsAccessor.GetValueBoolean(nameof(RejectBadlyFittingMatches), false);
+            useRANSAC = optionsAccessor.GetValueBoolean(nameof(UseRANSAC), true);
+            useTrees = optionsAccessor.GetValueBoolean(nameof(UseTrees), false);
         }
 
         public void ResetDefaults() {
@@ -76,6 +82,10 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             InterpolationAlgo = InterpolationAlgoEnum.MultiQuadric;
             InterpolationAmount = InterpolationAmountEnum.Medium;
             FixedSensorCenter = true;
+            previousRunBrightnessDiff = -1;
+            startingBrightnessDiff = -1;
+            rejectBadBrightnessMatches = false;
+            rejectBadlyFittingMatches = false;
         }
 
         private int stepCount;
@@ -342,5 +352,86 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 }
             }
         }
+
+        private bool useRANSAC = false;
+
+        public bool UseRANSAC {
+            get => useRANSAC;
+            set {
+                if (useRANSAC != value) {
+                    useRANSAC = value;
+                    optionsAccessor.SetValueBoolean(nameof(UseRANSAC), useRANSAC);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        private bool useTrees = false;
+
+        public bool UseTrees {
+            get => useTrees;
+            set {
+                if (useTrees != value) {
+                    useTrees = value;
+                    optionsAccessor.SetValueBoolean(nameof(UseTrees), useTrees);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        private bool rejectBadBrightnessMatches = false;
+
+        public bool RejectBadBrightnessMatches {
+            get => rejectBadBrightnessMatches;
+            set {
+                if (rejectBadBrightnessMatches != value) {
+                    rejectBadBrightnessMatches = value;
+                    optionsAccessor.SetValueBoolean(nameof(RejectBadBrightnessMatches), rejectBadBrightnessMatches);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        private bool rejectBadlyFittingMatches = false;
+
+        public bool RejectBadlyFittingMatches {
+            get => rejectBadlyFittingMatches;
+            set {
+                if (rejectBadlyFittingMatches != value) {
+                    rejectBadlyFittingMatches = value;
+                    optionsAccessor.SetValueBoolean(nameof(RejectBadlyFittingMatches), rejectBadlyFittingMatches);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        private double previousRunBrightnessDiff;
+
+        public double PreviousRunBrightnessDiff {
+            get => previousRunBrightnessDiff;
+            set {
+                if (previousRunBrightnessDiff != value) {
+                    previousRunBrightnessDiff = value;
+                    optionsAccessor.SetValueDouble(nameof(PreviousRunBrightnessDiff), previousRunBrightnessDiff);
+                    RaisePropertyChanged();
+                    RaisePropertyChanged("BrightnessToleranceHint");
+                }
+            }
+        }
+
+        private double startingBrightnessDiff;  // if this is -1, it means "auto" and previous run brightness diff is used as the starting point
+
+        public double StartingBrightnessDiff {
+            get => startingBrightnessDiff;
+            set {
+                if (startingBrightnessDiff != value) {
+                    startingBrightnessDiff = value;
+                    optionsAccessor.SetValueDouble(nameof(StartingBrightnessDiff), startingBrightnessDiff);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        public string BrightnessToleranceHint { get { return $"(auto: {PreviousRunBrightnessDiff:0.##})"; } }
     }
 }
