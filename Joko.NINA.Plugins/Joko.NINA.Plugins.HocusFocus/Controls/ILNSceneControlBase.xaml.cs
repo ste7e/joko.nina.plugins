@@ -164,6 +164,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Controls {
         }
 
         protected void UpdateScene() {
+            return;
             var scene = GetScene();
             if (scene == null) {
                 ClearScene();

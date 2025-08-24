@@ -903,8 +903,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             FilterInfo imagingFilter,
             List<StarDetectionRegion> regions,
             CancellationToken token,
-            IProgress<ApplicationStatus> progress) {
-            var autofocusFilter = await SetAutofocusFilter(imagingFilter, token, progress);
+            IProgress<ApplicationStatus> progress,
+            bool forRerun = false) {
+            var autofocusFilter = forRerun ? imagingFilter : await SetAutofocusFilter(imagingFilter, token, progress);
             return new AutoFocusState(
                 options,
                 autofocusFilter,
@@ -1355,7 +1356,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         private async Task<AutoFocusResult> RerunImpl(AutoFocusEngineOptions options, SavedAutoFocusAttempt savedAttempt, FilterInfo imagingFilter, List<StarDetectionRegion> regions, CancellationToken token, IProgress<ApplicationStatus> progress) {
             OnStarted();
 
-            var state = await InitializeState(options, imagingFilter, regions, token, progress);
+            var state = await InitializeState(options, imagingFilter, regions, token, progress, true);
             InitializeSave(state);
 
             state.OnNextAttempt();
@@ -1390,8 +1391,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     var focuserPosition = focuserPositionGroup.Key;
 
                     // Previous versions mistakenly saved the initial image in the attempt folder, which led to duplicate key exceptions
-                    var imageNumber = focuserPositionGroup.Max(g => g.ImageNumber);
-                    var files = focuserPositionGroup.Where(g => g.ImageNumber == imageNumber).OrderBy(g => g.FrameNumber).ToList();
+                    //var imageNumber = focuserPositionGroup.Max(g => g.ImageNumber);
+                    var files = focuserPositionGroup./*Where(g => g.ImageNumber == imageNumber).*/OrderBy(g => g.FrameNumber).ToList();
                     var allMeasurementTasks = new List<Task>();
                     foreach (var savedFile in files) {
                         var imageState = await state.OnNextImage(savedFile.FrameNumber, savedFile.FocuserPosition, false, token);
@@ -1587,7 +1588,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 HFRImprovementThreshold = autoFocusOptions.HFRImprovementThreshold,
                 AutoFocusTimeout = TimeSpan.FromSeconds(autoFocusOptions.AutoFocusTimeoutSeconds),
                 AutoFocusInitialOffsetSteps = profileService.ActiveProfile.FocuserSettings.AutoFocusInitialOffsetSteps,
-                AutoFocusStepSize = savedAttempt?.StepSize ?? profileService.ActiveProfile.FocuserSettings.AutoFocusStepSize,
+                AutoFocusStepSize = (savedAttempt?.StepSize > 0) ? savedAttempt.StepSize.Value : profileService.ActiveProfile.FocuserSettings.AutoFocusStepSize,
                 FocuserOffset = autoFocusOptions.FocuserOffset,
                 MaxOutlierRejections = autoFocusOptions.MaxOutlierRejections,
                 OutlierRejectionConfidence = autoFocusOptions.OutlierRejectionConfidence,
@@ -1607,8 +1608,24 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         public SavedAutoFocusAttempt LoadSavedAutoFocusAttempt(string path) {
             var attemptFolder = new DirectoryInfo(path);
             var attemptMatch = ATTEMPT_REGEX.Match(attemptFolder.Name);
-            if (!attemptMatch.Success || !int.TryParse(attemptMatch.Groups["ATTEMPT"].Value, out var attemptNumber)) {
-                throw new Exception("A folder named attemptXX must be selected");
+            var attemptNumber = 0;
+            if (!attemptMatch.Success || !int.TryParse(attemptMatch.Groups["ATTEMPT"].Value, out attemptNumber)) {
+                if (attemptFolder.Exists) {
+                    var subFolders = attemptFolder.EnumerateDirectories("attempt*");
+                    if (subFolders.Count() == 1) {
+                        attemptMatch = ATTEMPT_REGEX.Match(subFolders.FirstOrDefault().Name);
+                        if (!attemptMatch.Success || (!int.TryParse(attemptMatch.Groups["ATTEMPT"].Value, out attemptNumber))) {
+                            throw new Exception("A folder named attemptXX must be selected");
+                        } else {
+                            attemptFolder = subFolders.FirstOrDefault();
+                        }
+                    }
+                    if (!attemptMatch.Success) {
+                        throw new Exception("A folder named attemptXX must be selected");
+                    }
+                } else {
+                    throw new Exception("A folder named attemptXX must be selected");
+                }
             }
             return LoadSavedAttemptImpl(attemptFolder, attemptNumber, 3);
         }
@@ -1656,7 +1673,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             int stepSize = 0;
             if (savedImages.Count >= 2) {
                 var focuserPositions = savedImages.Select(i => i.FocuserPosition).Distinct().Order().Take(2).ToList();
-                stepSize = Math.Abs(focuserPositions[0] - focuserPositions[1]);
+                stepSize = (focuserPositions.Count>1) ? Math.Abs(focuserPositions[0] - focuserPositions[1]) : 0;
             }
             return new SavedAutoFocusAttempt() {
                 Attempt = attemptNumber,
