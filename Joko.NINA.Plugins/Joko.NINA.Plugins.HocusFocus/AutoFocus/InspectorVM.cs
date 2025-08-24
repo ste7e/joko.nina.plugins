@@ -277,7 +277,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             AutoFocusEngineOptions options,
             AutoFocusResult result,
             bool sensorCurveModelEnabled,
-            CancellationToken ct) {
+            CancellationToken ct,
+            bool forRerun = false) {
             if (result == null || !result.Succeeded) {
                 Logger.Error("Inspection analysis failed, due to failed AutoFocus");
                 return false;
@@ -309,9 +310,10 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     stepSize: result.StepSize,
                     ct: ct);
 
-                if (!String.IsNullOrEmpty(result.SaveFolder)) {
-                    await SaveRegisteredImages(result.SaveFolder, SensorModel.SensorModelResult.RegisteredStars);
-                }
+                if (!forRerun)
+                    if (!String.IsNullOrEmpty(result.SaveFolder)) {
+                        await SaveRegisteredImages(result.SaveFolder, SensorModel.SensorModelResult.RegisteredStars);
+                    }
             }
 
             UpdateBackfocusMeasurements(result);
@@ -758,7 +760,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     options,
                     result,
                     sensorCurveModelEnabled: sensorCurveModelEnabled,
-                    ct: localAnalyzeCts.Token);
+                    ct: localAnalyzeCts.Token,
+                    true);
                 if (!autoFocusAnalysisResult) {
                     Notification.ShowError("AutoFocus Analysis Failed");
                     InspectorErrorText = "AutoFocus Analysis Failed";
@@ -779,11 +782,11 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                             SimpleAnalysisErrorText = $"Cannot display FWHM Contour and Eccentricity Vectors\n.No saved images in final directory {finalDirectory}.";
                             Logger.Error($"No saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
                             Notification.ShowError($"No saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
-                        } else if (savedFinalAttempt.SavedImages.Count > 1) {
+/*                        } else if (savedFinalAttempt.SavedImages.Count > 1) {
                             SimpleAnalysisErrorText = $"Cannot display FWHM Contour and Eccentricity Vectors.\nMultiple saved images in final directory {finalDirectory}.";
                             Logger.Error($"Multiple saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
                             Notification.ShowError($"Multiple saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
-                        } else {
+*/                        } else {
                             var savedFinalImage = savedFinalAttempt.SavedImages[0];
                             var exposureAnalysisResult = await LoadAndAnalyzeExposure(autoFocusEngine, options, savedFinalImage, analyzeCts.Token);
                             if (!exposureAnalysisResult) {

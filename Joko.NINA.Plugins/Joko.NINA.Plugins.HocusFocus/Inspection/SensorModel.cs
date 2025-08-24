@@ -20,9 +20,11 @@ using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.Utility;
 using NINA.Profile.Interfaces;
+using OpenCvSharp;
 using OxyPlot.Series;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -121,6 +123,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 var imageSize = firstStarDetectionResult.ImageSize;
                 var pixelSize = firstStarDetectionResult.PixelSize;
                 Logger.Info($"Building Sensor Model. FRatio ({fRatio}), Focuser Size ({focuserSizeMicrons}), Pixel Size ({pixelSize}), Image size ({imageSize})");
+
                 var fitResult = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize, stepSize: stepSize);
                 var dataPoints = fitResult.Points;
                 if (dataPoints.Count < 9) {
@@ -317,14 +320,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             double pixelSize,
             int stepSize) {
             using (var stopwatch = MultiStopWatch.Measure()) {
-                var allDetectedStarTrees = allDetectedStars.Select(result => {
-                    var tree = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
-                    foreach (var (star, starIndex) in result.StarDetectionResult.StarList.Select((star, starIndex) => (star, starIndex))) {
-                        tree.Add(new[] { star.Position.X, star.Position.Y }, new DetectedStarIndex(starIndex, (HocusFocusDetectedStar)star));
-                    }
-                    return tree;
-                }).ToArray();
-                stopwatch.RecordEntry("build trees");
+                // registration phase
 
                 int minHfrIndex = 0;
                 double minHfr = allDetectedStars[0].StarDetectionResult.AverageHFR;
@@ -336,7 +332,44 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     }
                 }
 
-                const float searchRadius = 30;
+                if (autoFocusOptions.UseRANSAC) {
+                    var targetStars = allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Select(s => new Point2D(s.Position.X, s.Position.Y, s.MaxBrightness));
+                    for (int i = 0; i < allDetectedStars.Count; ++i) {
+                        if (i == minHfrIndex) {
+                            continue;
+                        }
+                        var theseStars = allDetectedStars[i].StarDetectionResult.StarList.Select(s => new Point2D(s.Position.X, s.Position.Y, s.MaxBrightness));
+                        var (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatches(theseStars.ToList(), targetStars.ToList(),
+                            maxDistance: 100.0d, magnitudeDiffThreshold: 5.0d);
+                        Trace.WriteLine($"Image {i}: Found {putativeSrc.Count} putative matches against reference image {minHfrIndex}");
+                        try {
+                            // calculate the transform needed to register this image
+                            var transform = RANSACRegistration.EstimateSimilarityTransform(putativeSrc, putativeDst);
+                            Trace.WriteLine($"Scale: {transform.Scale:F4}");
+                            Trace.WriteLine($"Rotation: {transform.Rotation:F4} radians");
+                            Trace.WriteLine($"Translation: ({transform.Tx:F4}, {transform.Ty:F4})");
+
+                            // adjust each star according to the transform
+                            for (int si = 0; si < allDetectedStars[i].StarDetectionResult.StarList.Count; si++) {
+                                var transformedPoint = transform.Transform(new Point2D(allDetectedStars[i].StarDetectionResult.StarList[si].Position));
+                                allDetectedStars[i].StarDetectionResult.StarList[si].Position = new Accord.Point((float)transformedPoint.X, (float)transformedPoint.Y);
+                            }
+                        } catch (Exception ex) {
+                            Trace.WriteLine($"Error: {ex.Message}");
+                        }
+                    }
+                }
+
+                var allDetectedStarTrees = allDetectedStars.Select(result => {
+                    var tree = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
+                    foreach (var (star, starIndex) in result.StarDetectionResult.StarList.Select((star, starIndex) => (star, starIndex))) {
+                        tree.Add(new[] { star.Position.X, star.Position.Y }, new DetectedStarIndex(starIndex, (HocusFocusDetectedStar)star));
+                    }
+                    return tree;
+                }).ToArray();
+                stopwatch.RecordEntry("build trees");
+
+                float searchRadius = 30;
                 var globalRegistry = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
                 var starIndexMap = Enumerable.Range(0, allDetectedStars.Count).Select(i => new Dictionary<int, int>()).ToArray();
                 foreach (var starNode in allDetectedStarTrees[minHfrIndex]) {
@@ -377,7 +410,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                             continue;
                         }
 
-                        nextStarIndexMap.Add(nextCandidate.SourceIndex, nextCandidate.GlobalIndex);
+                        if (nextCandidate.SourceIndex != nextCandidate.GlobalIndex)
+                            nextStarIndexMap.Add(nextCandidate.SourceIndex, nextCandidate.GlobalIndex);
                         matchedGlobalStars[nextCandidate.GlobalIndex] = true;
                         matchedSourceStars[nextCandidate.SourceIndex] = true;
                     }
@@ -396,6 +430,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     var nextStarIndexMap = starIndexMap[i];
                     var focuserPosition = allDetectedStars[i].FocuserPosition;
                     var detectedStars = allDetectedStars[i].StarDetectionResult.StarList;
+
                     foreach (var nextKvp in nextStarIndexMap) {
                         var sourceIndex = nextKvp.Key;
                         var globalIndex = nextKvp.Value;
@@ -408,6 +443,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         registeredStars[globalIndex].MatchedStars.Add(matchedStar);
                     }
                 }
+
+                // registration phase done
                 stopwatch.RecordEntry("registration");
 
                 int discardedStarCount = 0;
