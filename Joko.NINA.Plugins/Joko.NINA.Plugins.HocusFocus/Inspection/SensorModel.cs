@@ -339,6 +339,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         .Select(s => new Point2D(s.Position.X, s.Position.Y, s.MaxBrightness))
                         .OrderBy(s => s.X + (s.Y * imageSize.Width));
                     double brightnessMinFactor = 0;
+                    double maxBrightnessDiff = 0.5d;
                     double brightnessMinimumRef = allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Average(s => s.MaxBrightness) * brightnessMinFactor;
                     for (int i = 0; i < allDetectedStars.Count; ++i) {
                         if (i == minHfrIndex) {
@@ -351,7 +352,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         var (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatches(
                             theseStars.Where(s => s.Magnitude > brightnessMinimum).ToList(),
                             targetStars.Where(s => s.Magnitude > brightnessMinimumRef).ToList(),
-                            maxDistance: 50, magnitudeDiffThreshold: .05d);
+                            maxDistance: 50, magnitudeDiffThreshold: maxBrightnessDiff);
                         //Trace.WriteLine($"Image {i}: From brightest {theseStars.Count(s => s.Magnitude > brightnessMinimum)} of {theseStars.Count()} stars found {putativeSrc.Count} putative matches against reference image {minHfrIndex}");
                         try {
                             // calculate the transform needed to register this image
@@ -393,7 +394,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                             var searchPoint = new Point((int)star.Position.X, (int)star.Position.Y);
                             var searchArea = new System.Drawing.Rectangle(searchPoint.X - searchSquareSide, searchPoint.Y - searchSquareSide, searchSquareSide * 2 + 1, searchSquareSide * 2 + 1);
                             // find a star in the reference image that is within the search area and closest to the current star
-                            IEnumerable<Point> refStars = starDict.Keys.Where(p => searchArea.Contains(p.X, p.Y)).OrderBy(p => DistanceSquared(p.X, p.Y, searchPoint.X, searchPoint.Y));
+                            IEnumerable<Point> refStars = starDict.Keys.Where(p =>
+                                searchArea.Contains(p.X, p.Y)
+                                    && (starDict[p].Average(d => d.Star.MaxBrightness) - star.MaxBrightness < maxBrightnessDiff)
+                                    )
+                                .OrderBy(p => DistanceSquared(p.X, p.Y, searchPoint.X, searchPoint.Y));
                             if (refStars.Count() > 0) {
                                 starDict[refStars.Last()].Add(new MatchedStar() {
                                     FocuserPosition = allDetectedStars[i].FocuserPosition,
@@ -405,7 +410,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     }
 
                     float minBrightness = 0.05f;
-                    float minMatchProportion = 1;   // proportion of images that must have star for star to be included
+                    float minMatchProportion = 0.75f;   // proportion of images that must have star for star to be included
                     int starCount = starDict.Keys.Count(pt => starDict[pt].Count >= allDetectedStars.Count * minMatchProportion);   // only use stars that are matched by 75% of the images
                     registeredStars = starDict.Keys.Where(pt => starDict[pt].Count >= allDetectedStars.Count * minMatchProportion).Select(pt => {
                         var rs = new RegisteredStar() {
