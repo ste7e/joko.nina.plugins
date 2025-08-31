@@ -23,18 +23,18 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
     public class Point2D {
         public double X { get; set; }
         public double Y { get; set; }
-        public double Magnitude { get; set; } // Optional: for brightness filtering
+        public double BrightnessRanking { get; set; } // Optional: for brightness filtering
 
-        public Point2D(double x, double y, double magnitude = 0) {
+        public Point2D(double x, double y, double brightnessRanking = 0) {
             X = x;
             Y = y;
-            Magnitude = magnitude;
+            BrightnessRanking = brightnessRanking;
         }
 
         public Point2D(Point point) {
             X = point.X;
             Y = point.Y;
-            Magnitude = 0;
+            BrightnessRanking = 0;
         }
     }
 
@@ -66,10 +66,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         public static (List<Point2D> srcPoints, List<Point2D> dstPoints) GeneratePutativeMatches(
             List<Point2D> refStars,
             List<Point2D> targetStars,
-            double maxDistance = 50.0,
-            double magnitudeDiffThreshold = 20.0) {
+            double maxDistance,
+            double brightnessRankingDiff) {
             var srcPoints = new List<Point2D>();
             var dstPoints = new List<Point2D>();
+            double maxDistance2 = maxDistance * maxDistance;    // distance stays as squared
 
             // For each star in reference image, find closest in target image
             foreach (var refStar in refStars) {
@@ -77,13 +78,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 double minDistance = double.MaxValue;
 
                 foreach (var targetStar in targetStars) {
-                    double distance = Math.Sqrt(
-                        Math.Pow(refStar.X - targetStar.X, 2) +
-                        Math.Pow(refStar.Y - targetStar.Y, 2));
+                    double x = refStar.X - targetStar.X;
+                    double y = refStar.Y - targetStar.Y;
+                    double distance = x * x + y * y;
 
                     // Filter by magnitude difference
-                    if (Math.Abs(refStar.Magnitude - targetStar.Magnitude) <= magnitudeDiffThreshold &&
-                        distance < minDistance && distance < maxDistance) {
+                    if (distance < minDistance && distance < maxDistance2 && Math.Abs(refStar.BrightnessRanking - targetStar.BrightnessRanking) <= brightnessRankingDiff
+                        ) {
                         minDistance = distance;
                         bestMatch = targetStar;
                     }
