@@ -308,6 +308,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     focuserSizeMicrons: focuserSizeMicrons,
                     finalFocusPosition: finalFocuserPosition,
                     stepSize: result.StepSize,
+                    starDetectionRegions: GetStarDetectionRegions(options, sensorCurveModelEnabled: true),
                     ct: ct);
 
                 if (!forRerun)
@@ -782,11 +783,12 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                             SimpleAnalysisErrorText = $"Cannot display FWHM Contour and Eccentricity Vectors\n.No saved images in final directory {finalDirectory}.";
                             Logger.Error($"No saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
                             Notification.ShowError($"No saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
-/*                        } else if (savedFinalAttempt.SavedImages.Count > 1) {
-                            SimpleAnalysisErrorText = $"Cannot display FWHM Contour and Eccentricity Vectors.\nMultiple saved images in final directory {finalDirectory}.";
-                            Logger.Error($"Multiple saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
-                            Notification.ShowError($"Multiple saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
-*/                        } else {
+                            /*                        } else if (savedFinalAttempt.SavedImages.Count > 1) {
+                                                        SimpleAnalysisErrorText = $"Cannot display FWHM Contour and Eccentricity Vectors.\nMultiple saved images in final directory {finalDirectory}.";
+                                                        Logger.Error($"Multiple saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
+                                                        Notification.ShowError($"Multiple saved images in final directory {finalDirectory}. Continuing without doing exposure analysis");
+                            */
+                        } else {
                             var savedFinalImage = savedFinalAttempt.SavedImages[0];
                             var exposureAnalysisResult = await LoadAndAnalyzeExposure(autoFocusEngine, options, savedFinalImage, analyzeCts.Token);
                             if (!exposureAnalysisResult) {

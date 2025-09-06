@@ -145,6 +145,7 @@
                 <RowDefinition />
                 <RowDefinition />
                 <RowDefinition />
+                <RowDefinition />
             </Grid.RowDefinitions>
             <TextBlock
                 Grid.Row="0"
@@ -419,6 +420,19 @@
                 HorizontalAlignment="Left"
                 VerticalAlignment="Center"
                 IsChecked="{Binding AutoFocusOptions.UseRANSAC}" />
+            <TextBlock
+                Grid.Row="14"
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                Text="Match with trees" />
+            <CheckBox
+                Grid.Row="14"
+                Grid.Column="1"
+                MinWidth="80"
+                Margin="5,5,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                IsChecked="{Binding AutoFocusOptions.UseTrees}" />
         </Grid>
     </DataTemplate>
     <DataTemplate x:Key="HocusFocus_StarDetection_Options">

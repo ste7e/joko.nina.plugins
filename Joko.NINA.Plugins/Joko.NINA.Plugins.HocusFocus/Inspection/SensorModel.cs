@@ -113,6 +113,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             double focuserSizeMicrons,
             double finalFocusPosition,
             int stepSize,
+            List<StarDetectionRegion> starDetectionRegions,
             CancellationToken ct) {
             if (allDetectedStars.Count == 0) {
                 throw new ArgumentException("Cannot update sensor model. No detected stars provided");
@@ -125,7 +126,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 var pixelSize = firstStarDetectionResult.PixelSize;
                 Logger.Info($"Building Sensor Model. FRatio ({fRatio}), Focuser Size ({focuserSizeMicrons}), Pixel Size ({pixelSize}), Image size ({imageSize})");
 
-                var fitResult = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize, stepSize: stepSize);
+                var fitResult = RegisterStarsAndFit(allDetectedStars, pixelSize: pixelSize, focuserSizeMicrons: focuserSizeMicrons, imageSize: imageSize,
+                    stepSize: stepSize, starDetectionRegions: starDetectionRegions);
                 var dataPoints = fitResult.Points;
                 if (dataPoints.Count < 9) {
                     throw new Exception($"Need at least 9 registered stars. Found {dataPoints.Count}");
@@ -319,7 +321,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             System.Drawing.Size imageSize,
             double focuserSizeMicrons,
             double pixelSize,
-            int stepSize) {
+            int stepSize,
+            List<StarDetectionRegion> starDetectionRegions) {
             using (var stopwatch = MultiStopWatch.Measure()) {
                 // registration phase
 
@@ -335,221 +338,15 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
                 RegisteredStar[] registeredStars = null;
 
-                if (autoFocusOptions.UseRANSAC) {
-                    var targetStars = allDetectedStars[minHfrIndex].StarDetectionResult.StarList
-                        .OrderBy(s => -s.MaxBrightness)
-                        .Select((s, i) => new Point2D(s.Position.X, s.Position.Y, i))
-                        .OrderBy(s => s.X + (s.Y * imageSize.Width));
-                    double brightnessMinFactor = 0;
-                    double maxBrightnessRankingDiff = targetStars.Count() * .02d; // 5 percent of stars either side of this relative brightness 0.5d;
-                    double brightnessMinimumRef = allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Average(s => s.MaxBrightness) * brightnessMinFactor;
-                    int maxDistanceForPutativeMatch = 25;
-                    for (int i = 0; i < allDetectedStars.Count; ++i) {
-                        if (i == minHfrIndex) {
-                            continue;
-                        }
-                        var theseStars = allDetectedStars[i].StarDetectionResult.StarList
-                            .OrderBy(s => -s.MaxBrightness)
-                            .Select((s, ind) => new Point2D(s.Position.X, s.Position.Y, ind))
-                            .OrderBy(s => s.X + (s.Y * imageSize.Width));
-                        double brightnessMinimum = allDetectedStars[i].StarDetectionResult.StarList.Average(s => s.MaxBrightness) * brightnessMinFactor;
-                        var (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatches(
-                            theseStars.ToList(),
-                            targetStars.ToList(),
-                            maxDistanceForPutativeMatch, maxBrightnessRankingDiff);
-                        try {
-                            // calculate the transform needed to register this image
-                            var transform = RANSACRegistration.EstimateSimilarityTransform(putativeSrc, putativeDst);
+                if (autoFocusOptions.UseRANSAC)
+                    RegisterStarsWithRANSAC(allDetectedStars, imageSize, stopwatch, minHfrIndex);
 
-                            // adjust each star according to the transform
-                            for (int si = 0; si < allDetectedStars[i].StarDetectionResult.StarList.Count; si++) {
-                                var oldPoint = allDetectedStars[i].StarDetectionResult.StarList[si].Position;
-                                var transformedPoint = transform.Transform(new Point2D(allDetectedStars[i].StarDetectionResult.StarList[si].Position));
-                                allDetectedStars[i].StarDetectionResult.StarList[si].Position = new Accord.Point((float)transformedPoint.X, (float)transformedPoint.Y);
-                            }
-                        } catch (Exception ex) {
-                            Trace.WriteLine($"Error: {ex.Message}");
-                        }
-                    }
+                if (autoFocusOptions.UseTrees)
+                    registeredStars = MatchStarsUsingKdTree(allDetectedStars, stopwatch, minHfrIndex, autoFocusOptions.UseRANSAC ? 3 : 30);
+                else
+                    registeredStars = MatchStarsWithoutKdTree(allDetectedStars, imageSize, stopwatch, minHfrIndex, starDetectionRegions,
+                        autoFocusOptions.UseRANSAC ? 1 : 30);
 
-                    // create dictionary of stars in the reference image
-                    Dictionary<Point2D, List<MatchedStar>> starDict = new(allDetectedStars.Count * allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Count);
-                    foreach ((HocusFocusDetectedStar, int) si in allDetectedStars[minHfrIndex].StarDetectionResult.StarList
-                        .OrderBy(s => -s.MaxBrightness)
-                        .Select((star, index) => ((HocusFocusDetectedStar)star, index))) {
-                        HocusFocusDetectedStar star = si.Item1;
-                        int index = si.Item2;
-                        star.BrightnessRanking = index;
-                        starDict.Add(new Point2D(si.Item1.Position.X, star.Position.Y, index), new List<MatchedStar>() { new MatchedStar() {
-                                FocuserPosition = allDetectedStars[minHfrIndex].FocuserPosition,
-                                Star = (HocusFocusDetectedStar)star,
-                                ImageIndex = minHfrIndex
-                            } });
-                    }
-
-                    int allStarCount = starDict.Count;
-                    // remove the dimmest stars so we only keep the brightest ones
-                    int minMatchPct = 25;   // proportion of images that must have star for star to be included
-                    int brightnessRankPct = 75; // the precentage of brightest stars will be included
-                    int maxStarsToKeep = (int)(allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Count * (brightnessRankPct / 100.0));
-                    foreach (var pt in starDict.Keys.Where(pt => pt.BrightnessRanking > maxStarsToKeep))
-                        starDict.Remove(pt);
-
-                    // in other images find stars that are close to the reference image
-                    int searchSquareSide = 1;
-                    for (int i = 0; i < allDetectedStars.Count; ++i) {
-                        if (i == minHfrIndex) {
-                            continue;
-                        }
-                        foreach ((HocusFocusDetectedStar, int) si in allDetectedStars[i].StarDetectionResult.StarList
-                            .OrderBy(s => -s.MaxBrightness)
-                            .Select((star, index) => ((HocusFocusDetectedStar)star, index))) {
-                            HocusFocusDetectedStar star = si.Item1;
-                            int index = si.Item2;
-                            ((HocusFocusDetectedStar)star).BrightnessRanking = index;
-                            var searchPoint = new Point2D(star.Position.X, star.Position.Y, index);
-                            var searchArea = new System.Drawing.Rectangle((int)searchPoint.X - searchSquareSide, (int)searchPoint.Y - searchSquareSide, searchSquareSide * 2 + 1, searchSquareSide * 2 + 1);
-                            // find a star in the reference image that is within the search area and closest to the current star
-                            IEnumerable<Point2D> refStars = starDict.Keys
-                                .Where(p => searchArea.Contains((int)p.X, (int)p.Y) && (p.BrightnessRanking - index < maxBrightnessRankingDiff))
-                                .OrderBy(p => -DistanceSquared(p.X, p.Y, searchPoint.X, searchPoint.Y));
-                            if (refStars.Any()) {
-                                starDict[refStars.Last()].Add(new MatchedStar() {
-                                    FocuserPosition = allDetectedStars[i].FocuserPosition,
-                                    Star = (HocusFocusDetectedStar)star,
-                                    ImageIndex = i
-                                });
-                            }
-                        }
-                    }
-
-                    int starCount = starDict.Count;
-                    int minStars = starCount /10;
-                    if (minStars < 10) minStars = 10;
-                    int matchPct;
-                    for (matchPct = 100;matchPct>minMatchPct;matchPct-=10) {
-                        registeredStars = starDict.Keys
-                            .Where(pt => starDict[pt].Count >= allDetectedStars.Count * matchPct / 100)   // only use stars that are matched by minMatchPct% of the images
-                            .Select(pt => {
-                                var rs = new RegisteredStar() {
-                                    RegistrationX = pt.X,
-                                    RegistrationY = pt.Y,
-                                };
-                                foreach (var focuserPositionGroup in starDict[pt].GroupBy(s => s.FocuserPosition)) {
-                                    var focuserPosition = focuserPositionGroup.Key;
-                                    MatchedStar aveStar = new MatchedStar() {
-                                        FocuserPosition = focuserPosition,
-                                        Star = new() {
-                                            BoundingBox = focuserPositionGroup.First().Star.BoundingBox,
-                                            Position = focuserPositionGroup.First().Star.Position,
-                                            PSF = focuserPositionGroup.First().Star.PSF,
-                                            Background = focuserPositionGroup.Average(g => g.Star.Background),
-                                            AverageBrightness = focuserPositionGroup.Average(g => g.Star.Background),
-                                            HFR = focuserPositionGroup.Average(g => g.Star.HFR),
-                                            MaxBrightness = focuserPositionGroup.Average(g => g.Star.MaxBrightness),
-                                        }
-                                    };
-
-                                    rs.MatchedStars.Add(aveStar);
-                                }
-                                return rs;
-                            }).ToArray();
-                        if (registeredStars.Count() > minStars) { // enough stars so stop now
-                            Trace.WriteLine($"{registeredStars.Count()} stars found with with matchPct set to {matchPct}");
-                            break;
-                        }
-                        Trace.WriteLine($"Too few stars ({registeredStars.Count()}) with matchPct set to {matchPct}");
-                    }
-
-                    stopwatch.RecordEntry("RANSAC-based registration");
-
-                    Trace.WriteLine($"Of all {allStarCount} stars found, {maxStarsToKeep} stars were selected on brightness (top {brightnessRankPct}%)");
-                    Trace.WriteLine($"{starCount} were registered and matched to stars in other images.  Stars on enough images ({matchPct}%) are {registeredStars.Count()}");
-                } else {
-                    var allDetectedStarTrees = allDetectedStars.Select(result => {
-                        var tree = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
-                        foreach (var (star, starIndex) in result.StarDetectionResult.StarList.Select((star, starIndex) => (star, starIndex))) {
-                            tree.Add(new[] { star.Position.X, star.Position.Y }, new DetectedStarIndex(starIndex, (HocusFocusDetectedStar)star));
-                        }
-                        return tree;
-                    }).ToArray();
-                    stopwatch.RecordEntry("build trees");
-
-                    float searchRadius = 30;
-                    var globalRegistry = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
-                    var starIndexMap = Enumerable.Range(0, allDetectedStars.Count).Select(i => new Dictionary<int, int>()).ToArray();
-                    foreach (var starNode in allDetectedStarTrees[minHfrIndex]) {
-                        var nextIndex = globalRegistry.Count;
-                        globalRegistry.Add(starNode.Point, new DetectedStarIndex(nextIndex, starNode.Value.DetectedStar));
-                        starIndexMap[minHfrIndex].Add(starNode.Value.Index, nextIndex);
-                    }
-
-                    float[] pointDiff = new float[2];
-                    for (int i = 0; i < allDetectedStars.Count; ++i) {
-                        if (i == minHfrIndex) {
-                            continue;
-                        }
-
-                        var nextStarList = allDetectedStars[i].StarDetectionResult.StarList;
-                        var nextStarTree = allDetectedStarTrees[i];
-                        var nextStarIndexMap = starIndexMap[i];
-                        var matchedGlobalStars = new bool[globalRegistry.Count];
-                        var matchedSourceStars = new bool[nextStarTree.Count];
-                        var queue = new KdTree.PriorityQueue<MatchingPair, double>(new DoubleMath());
-                        foreach (var (starNode, starNodeIndex) in nextStarTree.Select((starNode, starNodeIndex) => (starNode, starNodeIndex))) {
-                            var sourceStar = starNode.Value.DetectedStar;
-                            var sourcePoint = starNode.Point;
-                            var sourceIndex = starNode.Value.Index;
-                            var globalNeighbors = globalRegistry.RadialSearch(sourcePoint, searchRadius);
-                            foreach (var globalNeighbor in globalNeighbors) {
-                                var globalNeighborIndex = globalNeighbor.Value.Index;
-                                pointDiff[0] = globalNeighbor.Point[0] - sourcePoint[0];
-                                pointDiff[1] = globalNeighbor.Point[1] - sourcePoint[1];
-                                var distance = MathUtility.DotProduct(pointDiff, pointDiff);
-                                queue.Enqueue(new MatchingPair() { SourceIndex = sourceIndex, GlobalIndex = globalNeighborIndex }, distance);
-                            }
-                        }
-
-                        while (queue.Count > 0) {
-                            var nextCandidate = queue.Dequeue();
-                            if (matchedGlobalStars[nextCandidate.GlobalIndex] || matchedSourceStars[nextCandidate.SourceIndex]) {
-                                continue;
-                            }
-
-                            if (nextCandidate.SourceIndex != nextCandidate.GlobalIndex)
-                                nextStarIndexMap.Add(nextCandidate.SourceIndex, nextCandidate.GlobalIndex);
-                            matchedGlobalStars[nextCandidate.GlobalIndex] = true;
-                            matchedSourceStars[nextCandidate.SourceIndex] = true;
-                        }
-                    }
-
-                    registeredStars = new RegisteredStar[globalRegistry.Count];
-                    foreach (var globalNode in globalRegistry) {
-                        var registeredStar = new RegisteredStar() {
-                            RegistrationX = globalNode.Value.DetectedStar.Position.X,
-                            RegistrationY = globalNode.Value.DetectedStar.Position.Y
-                        };
-                        registeredStars[globalNode.Value.Index] = registeredStar;
-                    }
-
-                    for (int i = 0; i < starIndexMap.Length; ++i) {
-                        var nextStarIndexMap = starIndexMap[i];
-                        var focuserPosition = allDetectedStars[i].FocuserPosition;
-                        var detectedStars = allDetectedStars[i].StarDetectionResult.StarList;
-
-                        foreach (var nextKvp in nextStarIndexMap) {
-                            var sourceIndex = nextKvp.Key;
-                            var globalIndex = nextKvp.Value;
-                            var sourceStar = (HocusFocusDetectedStar)detectedStars[sourceIndex];
-                            var matchedStar = new MatchedStar() {
-                                FocuserPosition = focuserPosition,
-                                Star = sourceStar,
-                                ImageIndex = i
-                            };
-                            registeredStars[globalIndex].MatchedStars.Add(matchedStar);
-                        }
-                    }
-                }
                 // registration phase done
                 stopwatch.RecordEntry("registration");
 
@@ -603,6 +400,289 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     return new RegistrationAndFitResult(sensorModelDataPoints, registeredStars);
                 }
             }
+        }
+
+        private void RegisterStarsWithRANSAC(
+            List<SensorDetectedStars> allDetectedStars,
+            System.Drawing.Size imageSize,
+            MultiStopWatch stopwatch,
+            int minHfrIndex) {
+            var targetStars = allDetectedStars[minHfrIndex].StarDetectionResult.StarList
+                .OrderBy(s => -s.MaxBrightness)
+                .Select((s, i) => new Point2D(s.Position.X, s.Position.Y, i))
+                .OrderBy(s => s.X + (s.Y * imageSize.Width));
+            double brightnessMinFactor = 0;
+            double maxBrightnessRankingDiff = targetStars.Count() * .02d; // 5 percent of stars either side of this relative brightness 0.5d;
+            double brightnessMinimumRef = allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Average(s => s.MaxBrightness) * brightnessMinFactor;
+            int maxDistanceForPutativeMatch = 25;
+            for (int i = 0; i < allDetectedStars.Count; ++i) {
+                if (i == minHfrIndex) {
+                    continue;
+                }
+                var theseStars = allDetectedStars[i].StarDetectionResult.StarList
+                    .OrderBy(s => -s.MaxBrightness)
+                    .Select((s, ind) => new Point2D(s.Position.X, s.Position.Y, ind))
+                    .OrderBy(s => s.X + (s.Y * imageSize.Width));
+                double brightnessMinimum = allDetectedStars[i].StarDetectionResult.StarList.Average(s => s.MaxBrightness) * brightnessMinFactor;
+                var (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatches(
+                    theseStars.ToList(),
+                    targetStars.ToList(),
+                    maxDistanceForPutativeMatch, maxBrightnessRankingDiff);
+                try {
+                    // calculate the transform needed to register this image
+                    var transform = RANSACRegistration.EstimateSimilarityTransform(putativeSrc, putativeDst);
+
+                    // adjust each star according to the transform
+                    for (int si = 0; si < allDetectedStars[i].StarDetectionResult.StarList.Count; si++) {
+                        var oldPoint = allDetectedStars[i].StarDetectionResult.StarList[si].Position;
+                        var transformedPoint = transform.Transform(new Point2D(allDetectedStars[i].StarDetectionResult.StarList[si].Position));
+                        allDetectedStars[i].StarDetectionResult.StarList[si].Position = new Accord.Point((float)transformedPoint.X, (float)transformedPoint.Y);
+                    }
+                } catch (Exception ex) {
+                    Trace.WriteLine($"Error: {ex.Message}");
+                }
+            }
+        }
+
+        private static RegisteredStar[] MatchStarsUsingKdTree(List<SensorDetectedStars> allDetectedStars, MultiStopWatch stopwatch, int minHfrIndex, float searchRadius) {
+            RegisteredStar[] registeredStars;
+            var allDetectedStarTrees = allDetectedStars.Select(result => {
+                var tree = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
+                foreach (var (star, starIndex) in result.StarDetectionResult.StarList.Select((star, starIndex) => (star, starIndex))) {
+                    tree.Add(new[] { star.Position.X, star.Position.Y }, new DetectedStarIndex(starIndex, (HocusFocusDetectedStar)star));
+                }
+                return tree;
+            }).ToArray();
+            stopwatch.RecordEntry("build trees");
+
+            var globalRegistry = new KdTree<float, DetectedStarIndex>(2, new FloatMath(), AddDuplicateBehavior.Error);
+            var starIndexMap = Enumerable.Range(0, allDetectedStars.Count).Select(i => new Dictionary<int, int>()).ToArray();
+            foreach (var starNode in allDetectedStarTrees[minHfrIndex]) {
+                var nextIndex = globalRegistry.Count;
+                globalRegistry.Add(starNode.Point, new DetectedStarIndex(nextIndex, starNode.Value.DetectedStar));
+                starIndexMap[minHfrIndex].Add(starNode.Value.Index, nextIndex);
+            }
+
+            //float[] pointDiff = new float[2];
+            float totalDiff = 0f;
+            int neighborCount = 0;
+            for (int i = 0; i < allDetectedStars.Count; ++i) {
+                if (i == minHfrIndex) {
+                    continue;
+                }
+
+                double maxBrightnessRankingDiff = allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Count() * .10d; // 5 percent of stars either side of this relative brightness 0.5d;
+                foreach (var detectedStars in allDetectedStars)
+                    foreach (var (star, index) in detectedStars.StarDetectionResult.StarList
+                                                                    .OrderBy(s => -s.MaxBrightness)
+                                                                    .Select((star, index) => ((HocusFocusDetectedStar)star, index))) {
+                        star.BrightnessRanking = index;
+                    }
+
+                var nextStarList = allDetectedStars[i].StarDetectionResult.StarList;
+                var nextStarTree = allDetectedStarTrees[i];
+                var nextStarIndexMap = starIndexMap[i];
+                var matchedGlobalStars = new bool[globalRegistry.Count];
+                var matchedSourceStars = new bool[nextStarTree.Count];
+                var queue = new KdTree.PriorityQueue<MatchingPair, double>(new DoubleMath());
+                foreach (var (starNode, starNodeIndex) in nextStarTree.Select((starNode, starNodeIndex) => (starNode, starNodeIndex))) {
+                    var sourceStar = starNode.Value.DetectedStar;
+                    var sourcePoint = starNode.Point;
+                    var sourceIndex = starNode.Value.Index;
+                    var globalNeighbors = globalRegistry.RadialSearch(sourcePoint, searchRadius);
+                    foreach (var globalNeighbor in globalNeighbors) {
+                        var globalNeighborIndex = globalNeighbor.Value.Index;
+                        var neighboringStar = globalNeighbor.Value.DetectedStar;
+                        if (Math.Abs(neighboringStar.BrightnessRanking - sourceStar.BrightnessRanking) < maxBrightnessRankingDiff) {
+                            //pointDiff[0] = globalNeighbor.Point[0] - sourcePoint[0];
+                            //pointDiff[1] = globalNeighbor.Point[1] - sourcePoint[1];
+                            var distance = MathUtility.DotProduct(globalNeighbor.Point, sourcePoint);
+                            queue.Enqueue(new MatchingPair() { SourceIndex = sourceIndex, GlobalIndex = globalNeighborIndex }, -distance);
+                            totalDiff += distance;
+                            neighborCount++;
+                        }
+                    }
+                }
+
+                Trace.WriteLine($"Image {i}: average matching star distance: {totalDiff / (float)neighborCount}");
+                while (queue.Count > 0) {
+                    var nextCandidate = queue.Dequeue();
+                    if (matchedGlobalStars[nextCandidate.GlobalIndex] || matchedSourceStars[nextCandidate.SourceIndex]) {
+                        continue;
+                    }
+
+                    if (nextCandidate.SourceIndex != nextCandidate.GlobalIndex)
+                        nextStarIndexMap.Add(nextCandidate.SourceIndex, nextCandidate.GlobalIndex);
+                    matchedGlobalStars[nextCandidate.GlobalIndex] = true;
+                    matchedSourceStars[nextCandidate.SourceIndex] = true;
+                }
+            }
+
+            registeredStars = new RegisteredStar[globalRegistry.Count];
+            foreach (var globalNode in globalRegistry) {
+                var registeredStar = new RegisteredStar() {
+                    RegistrationX = globalNode.Value.DetectedStar.Position.X,
+                    RegistrationY = globalNode.Value.DetectedStar.Position.Y
+                };
+                registeredStars[globalNode.Value.Index] = registeredStar;
+            }
+
+            for (int i = 0; i < starIndexMap.Length; ++i) {
+                var nextStarIndexMap = starIndexMap[i];
+                var focuserPosition = allDetectedStars[i].FocuserPosition;
+                var detectedStars = allDetectedStars[i].StarDetectionResult.StarList;
+
+                foreach (var nextKvp in nextStarIndexMap) {
+                    var sourceIndex = nextKvp.Key;
+                    var globalIndex = nextKvp.Value;
+                    var sourceStar = (HocusFocusDetectedStar)detectedStars[sourceIndex];
+                    var matchedStar = new MatchedStar() {
+                        FocuserPosition = focuserPosition,
+                        Star = sourceStar,
+                        ImageIndex = i
+                    };
+                    registeredStars[globalIndex].MatchedStars.Add(matchedStar);
+                }
+            }
+
+            return registeredStars;
+        }
+
+        private RegisteredStar[] MatchStarsWithoutKdTree(
+            List<SensorDetectedStars> allDetectedStars,
+            System.Drawing.Size imageSize,
+            MultiStopWatch stopwatch,
+            int minHfrIndex,
+            List<StarDetectionRegion> starDetectionRegions,
+            int searchSquareSide) {
+            RegisteredStar[] registeredStars = null;
+            double maxBrightnessRankingDiff = allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Count() * .10d; // 5 percent of stars either side of this relative brightness 0.5d;
+
+            // create dictionary of stars in the reference image
+            Dictionary<Point2D, List<MatchedStar>> starDict = new(allDetectedStars.Count * allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Count);
+            foreach ((HocusFocusDetectedStar, int) si in allDetectedStars[minHfrIndex].StarDetectionResult.StarList
+                .OrderBy(s => -s.MaxBrightness)
+                .Select((star, index) => ((HocusFocusDetectedStar)star, index))) {
+                HocusFocusDetectedStar star = si.Item1;
+                int index = si.Item2;
+                star.BrightnessRanking = index;
+                starDict.Add(new Point2D(si.Item1.Position.X, star.Position.Y, index), new List<MatchedStar>() { new MatchedStar() {
+                                FocuserPosition = allDetectedStars[minHfrIndex].FocuserPosition,
+                                Star = (HocusFocusDetectedStar)star,
+                                ImageIndex = minHfrIndex
+                            } });
+            }
+
+            int allStarCount = starDict.Count;
+            // remove the dimmest stars so we only keep the brightest ones
+            int minMatchPct = 25;   // proportion of images that must have star for star to be included
+            int brightnessRankPct = 75; // the precentage of brightest stars will be included
+            int maxStarsToKeep = (int)(allDetectedStars[minHfrIndex].StarDetectionResult.StarList.Count * (brightnessRankPct / 100.0));
+            foreach (var pt in starDict.Keys.Where(pt => pt.BrightnessRanking > maxStarsToKeep))
+                starDict.Remove(pt);
+
+            // in other images find stars that are close to the reference image
+            for (int i = 0; i < allDetectedStars.Count; ++i) {
+                if (i == minHfrIndex) {
+                    continue;
+                }
+                foreach ((HocusFocusDetectedStar, int) si in allDetectedStars[i].StarDetectionResult.StarList
+                    .OrderBy(s => -s.MaxBrightness)
+                    .Select((star, index) => ((HocusFocusDetectedStar)star, index))) {
+                    HocusFocusDetectedStar star = si.Item1;
+                    int index = si.Item2;
+                    ((HocusFocusDetectedStar)star).BrightnessRanking = index;
+                    var searchPoint = new Point2D(star.Position.X, star.Position.Y, index);
+                    var searchArea = new System.Drawing.Rectangle((int)searchPoint.X - searchSquareSide, (int)searchPoint.Y - searchSquareSide, searchSquareSide * 2 + 1, searchSquareSide * 2 + 1);
+                    // find a star in the reference image that is within the search area and closest to the current star
+                    IEnumerable<Point2D> refStars = starDict.Keys
+                        .Where(p => searchArea.Contains((int)p.X, (int)p.Y) && (p.BrightnessRanking - index < maxBrightnessRankingDiff))
+                        .OrderBy(p => -DistanceSquared(p.X, p.Y, searchPoint.X, searchPoint.Y));
+                    if (refStars.Any()) {
+                        starDict[refStars.Last()].Add(new MatchedStar() {
+                            FocuserPosition = allDetectedStars[i].FocuserPosition,
+                            Star = (HocusFocusDetectedStar)star,
+                            ImageIndex = i
+                        });
+                    }
+                }
+            }
+
+            int starCount = starDict.Count;
+            int minStars = starCount / 2;  // minimum of 10% of detected stars must be matched
+            if (minStars < 50) minStars = 50;
+            int minStarsPerRegion = 9;
+            int maxScarceRegions = 1;   // number of regions that are allowed to be scarcly populated with stars
+            int matchPct;
+            Dictionary<System.Drawing.Rectangle, (int, int)> starsPerRegion = new Dictionary<System.Drawing.Rectangle, (int, int)>(starDetectionRegions.Count); // item1=stars in the region that are matched, item2=stars in the region
+            starDetectionRegions.ForEach(r => {
+                System.Drawing.Rectangle rect = r.OuterBoundary.ToRectangle(imageSize);
+                if (!starsPerRegion.ContainsKey(rect)) starsPerRegion.Add(rect, (0, 0));
+            });
+
+            foreach (var pt in starDict.Keys) {
+                starsPerRegion.Keys
+                                .Where(r => r.Contains((int)pt.X, (int)pt.Y))
+                                .ToList()
+                                .ForEach(r => starsPerRegion[r] = (starsPerRegion[r].Item1, starsPerRegion[r].Item2 + 1));
+            }
+            for (matchPct = 100; matchPct > minMatchPct; matchPct -= 10) {
+                // reset starsPerRegion dictionary
+                starsPerRegion.Keys.ToList().ForEach(spr => starsPerRegion[spr] = (0, starsPerRegion[spr].Item2));
+                registeredStars = starDict.Keys
+                    .Where(pt => starDict[pt].Count >= allDetectedStars.Count * matchPct / 100)   // only use stars that are matched by matchPct% of the images
+                    .Select(pt => {
+                        var rs = new RegisteredStar() {
+                            RegistrationX = pt.X,
+                            RegistrationY = pt.Y,
+                        };
+                        foreach (var focuserPositionGroup in starDict[pt].GroupBy(s => s.FocuserPosition)) {
+                            var focuserPosition = focuserPositionGroup.Key;
+                            var firstStarIngroup = focuserPositionGroup.First().Star;
+                            MatchedStar aveStar = new MatchedStar() {
+                                FocuserPosition = focuserPosition,
+                                Star = new() {
+                                    BoundingBox = firstStarIngroup.BoundingBox,
+                                    Position = firstStarIngroup.Position,
+                                    PSF = firstStarIngroup.PSF,
+                                    Background = focuserPositionGroup.Average(g => g.Star.Background),
+                                    AverageBrightness = focuserPositionGroup.Average(g => g.Star.Background),
+                                    HFR = focuserPositionGroup.Average(g => g.Star.HFR),
+                                    MaxBrightness = focuserPositionGroup.Average(g => g.Star.MaxBrightness),
+                                }
+                            };
+
+                            rs.MatchedStars.Add(aveStar);
+                        }
+                        starsPerRegion.Keys
+                            .Where(r => r.Contains((int)pt.X, (int)pt.Y))
+                            .ToList()
+                            .ForEach(r => starsPerRegion[r] = (starsPerRegion[r].Item1 + 1, starsPerRegion[r].Item2));
+                        return rs;
+                    }).ToArray();
+
+                int regionsWithScarceStars = 0;
+                starsPerRegion.Values.Where(v => v.Item1 < Math.Min(minStarsPerRegion, v.Item2)).ToList().ForEach(_ => {
+                    Trace.WriteLine($"Too few stars in some regions ({string.Join(", ", starsPerRegion.Select(kvp => $"{kvp.Key}:{kvp.Value}"))}) with matchPct set to {matchPct}");
+                    regionsWithScarceStars++;
+                });
+                if (regionsWithScarceStars > maxScarceRegions) {
+                    Trace.WriteLine($"Too many scarcely populated regions ({regionsWithScarceStars})");
+                    continue;
+                }
+
+                if (registeredStars.Count() > minStars) { // enough stars so stop now
+                    Trace.WriteLine($"{starsPerRegion[StarDetectionRegion.Full.OuterBoundary.ToRectangle(imageSize)].Item1} stars found with with matchPct set to {matchPct}");
+                    break;
+                }
+                Trace.WriteLine($"Too few stars ({registeredStars.Count()}) with matchPct set to {matchPct}");
+            }
+
+            stopwatch.RecordEntry("NonTree-based registration");
+
+            Trace.WriteLine($"Of all {allStarCount} stars found, {maxStarsToKeep} stars were selected on brightness (top {brightnessRankPct}%)");
+            Trace.WriteLine($"{starCount} were registered and matched to stars in other images.  Stars on enough images ({matchPct}%) are {registeredStars.Length}");
+            return registeredStars;
         }
 
         private void relativiseStarBrightness(IOrderedEnumerable<Point2D> stars) {

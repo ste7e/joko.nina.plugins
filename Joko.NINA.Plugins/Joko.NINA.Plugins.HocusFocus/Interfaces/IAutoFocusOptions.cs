@@ -32,5 +32,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         bool UnevenHyperbolicFitEnabled { get; set; }
         bool WeightedHyperbolicFitEnabled { get; set; }
         bool UseRANSAC { get; set; }
+        bool UseTrees { get; set; }
     }
 }
