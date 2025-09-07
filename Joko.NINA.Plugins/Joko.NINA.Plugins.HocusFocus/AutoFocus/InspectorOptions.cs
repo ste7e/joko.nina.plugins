@@ -342,5 +342,25 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 }
             }
         }
+
+        private bool useRANSAC = true;
+
+        public bool UseRANSAC {
+            get => useRANSAC;
+            set {
+                useRANSAC = value;
+                RaisePropertyChanged();
+            }
+        }
+
+        private bool useTrees = false;
+
+        public bool UseTrees {
+            get => useTrees;
+            set {
+                useTrees = value;
+                RaisePropertyChanged();
+            }
+        }
     }
 }

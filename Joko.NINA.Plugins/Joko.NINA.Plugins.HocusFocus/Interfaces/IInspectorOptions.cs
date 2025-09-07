@@ -64,5 +64,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         InterpolationAlgoEnum InterpolationAlgo { get; set; }
         InterpolationAmountEnum InterpolationAmount { get; set; }
         bool FixedSensorCenter { get; set; }
+        bool UseRANSAC { get; set; }
+        bool UseTrees { get; set; }
     }
 }

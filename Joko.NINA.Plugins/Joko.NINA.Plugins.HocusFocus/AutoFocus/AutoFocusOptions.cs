@@ -81,26 +81,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             WeightedHyperbolicFitEnabled = true;
         }
 
-        private bool useRANSAC = true;
-
-        public bool UseRANSAC {
-            get => useRANSAC;
-            set {
-                useRANSAC = value;
-                RaisePropertyChanged();
-            }
-        }
-
-        private bool useTrees = false;
-
-        public bool UseTrees {
-            get => useTrees;
-            set {
-                useTrees = value;
-                RaisePropertyChanged();
-            }
-        }
-
         private int maxConcurrent;
 
         public int MaxConcurrent {
