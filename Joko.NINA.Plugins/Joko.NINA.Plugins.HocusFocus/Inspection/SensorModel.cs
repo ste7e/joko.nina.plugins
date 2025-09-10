@@ -421,7 +421,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         bestPfit = pfit;
                         bestReg = reg;
                     }
-                    Trace.WriteLine($"End of registerStarsAndFit iteration with R2 of {bestPfit.GoodnessOfFit}, retry is {retry}");
+                    Trace.WriteLine($"End of registerStarsAndFit iteration with R2 of {bestPfit?.GoodnessOfFit}, retry is {retry}");
                 }
                 return (bestPfit, bestReg);
             }
@@ -647,7 +647,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             int minHfrIndex,
             int searchSquareSide,
             double maxRelativeBrightnessDiff) {
-            List<StarDetectionRegion> regions = CreateFullRegionSet(imageSize, 3, 3);
+            List<StarDetectionRegion> regions = CreateFullRegionSet(imageSize, 2, 3);
             RegisteredStar[] registeredStars = new RegisteredStar[0];
 
             // create dictionary of stars in the reference image
