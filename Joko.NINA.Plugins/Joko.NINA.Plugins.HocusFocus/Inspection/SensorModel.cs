@@ -366,7 +366,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                             var globalNeighborIndex = globalNeighbor.Value.Index;
                             pointDiff[0] = globalNeighbor.Point[0] - sourcePoint[0];
                             pointDiff[1] = globalNeighbor.Point[1] - sourcePoint[1];
-                            var distance = MathUtility.DotProduct(pointDiff, pointDiff);
+                            var distance = MathUtility.DotProduct(globalNeighbor.Point, sourcePoint);
                             queue.Enqueue(new MatchingPair() { SourceIndex = sourceIndex, GlobalIndex = globalNeighborIndex }, distance);
                         }
                     }
