@@ -308,7 +308,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     focuserSizeMicrons: focuserSizeMicrons,
                     finalFocusPosition: finalFocuserPosition,
                     stepSize: result.StepSize,
-                    starDetectionRegions: GetStarDetectionRegions(options, sensorCurveModelEnabled: true),
                     ct: ct);
 
                 if (!forRerun)
