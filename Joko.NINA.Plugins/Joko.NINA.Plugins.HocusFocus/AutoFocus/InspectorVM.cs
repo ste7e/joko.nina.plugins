@@ -64,7 +64,9 @@ using System.Windows.Media.Imaging;
 
 namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
+    [PartCreationPolicy(CreationPolicy.Shared)]
     [Export(typeof(IDockableVM))]
+    [Export]
     public class InspectorVM : DockableVM, IScottPlotController, ICameraConsumer, IFocuserConsumer, ITelescopeConsumer {
         private static readonly FocusPointComparer focusPointComparer = new FocusPointComparer();
         private static readonly PlotPointComparer plotPointComparer = new PlotPointComparer();
@@ -85,7 +87,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         private readonly IPluggableBehaviorSelector<IStarAnnotator> starAnnotatorSelector;
         private readonly IApplicationDispatcher applicationDispatcher;
         private readonly IProgress<ApplicationStatus> progress;
-        private readonly IAlglibAPI alglibAPI;
 
         [ImportingConstructor]
         public InspectorVM(
@@ -136,7 +137,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             this.starDetectionSelector = starDetectionSelector;
             this.starAnnotatorSelector = starAnnotatorSelector;
             this.applicationDispatcher = applicationDispatcher;
-            this.alglibAPI = alglibAPI;
             this.progress = ProgressFactory.Create(applicationStatusMediator, "Aberration Inspector");
 
             this.cameraMediator.RegisterConsumer(this);
@@ -159,7 +159,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             ImageGeometry = (System.Windows.Media.GeometryGroup)dict["InspectorSVG"];
             ImageGeometry.Freeze();
 
-            RunAutoFocusAnalysisCommand = new AsyncCommand<bool>(AnalyzeAutoFocus, canExecute: (o) => !AnalysisRunning() && CameraInfo.Connected && FocuserInfo.Connected);
+            RunAutoFocusAnalysisCommand = new AsyncCommand<bool>(() => AnalyzeAutoFocusImpl(true), canExecute: (o) => !AnalysisRunning() && CameraInfo.Connected && FocuserInfo.Connected);
             RunExposureAnalysisCommand = new AsyncCommand<bool>(AnalyzeExposure, canExecute: (o) => !AnalysisRunning() && CameraInfo.Connected);
             RerunSavedAutoFocusAnalysisCommand = new AsyncCommand<bool>(AnalyzeSavedAutoFocusRun, canExecute: (o) => !AnalysisRunning());
             ClearAnalysesCommand = new RelayCommand(ClearAnalyses, canExecute: (o) => !AnalysisRunning());
@@ -183,7 +183,13 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         private CancellationTokenSource analyzeCts;
         private Task<bool> analyzeTask;
 
-        private async Task<bool> AnalyzeAutoFocus() {
+        public async Task<bool> AnalyzeAutoFocus(CancellationToken token, bool captureCameraBlock = false) {
+            var task = AnalyzeAutoFocusImpl(captureCameraBlock);
+            token.Register(() => analyzeCts?.Cancel());
+            return await task;
+        }
+
+        private async Task<bool> AnalyzeAutoFocusImpl(bool captureCameraBlock) {
             var localAnalyzeTask = analyzeTask;
             if (localAnalyzeTask != null && !localAnalyzeTask.IsCompleted) {
                 Notification.ShowError("Analysis still in progress");
@@ -196,7 +202,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
             localAnalyzeTask = Task.Run(async () => {
                 try {
-                    this.cameraMediator.RegisterCaptureBlock(this);
+                    if (captureCameraBlock) {
+                        this.cameraMediator.RegisterCaptureBlock(this);
+                    }
 
                     var autoFocusEngine = autoFocusEngineFactory.Create();
                     var options = GetAutoFocusEngineOptions(autoFocusEngine);
@@ -240,7 +248,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     Notification.ShowInformation("Aberration Inspection Complete");
                     return true;
                 } finally {
-                    this.cameraMediator.ReleaseCaptureBlock(this);
+                    if (captureCameraBlock) {
+                        this.cameraMediator.ReleaseCaptureBlock(this);
+                    }
                 }
             }, localAnalyzeCts.Token);
             analyzeTask = localAnalyzeTask;

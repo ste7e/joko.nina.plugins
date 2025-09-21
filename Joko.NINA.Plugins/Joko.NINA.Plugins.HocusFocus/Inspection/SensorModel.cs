@@ -20,12 +20,15 @@ using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.Utility;
 using NINA.Profile.Interfaces;
+using NINA.WPF.Base.Utility.AutoFocus;
+using OpenCvSharp;
 using OxyPlot.Series;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using static System.Windows.Forms.AxHost;
 
 namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
@@ -412,21 +415,40 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
                 int discardedStarCount = 0;
                 var sensorModelDataPoints = new List<SensorParaboloidDataPoint>();
+                var maxOutlierRejectedPoints = this.autoFocusOptions.MaxOutlierRejections;
+                var rejectionConfidence = this.autoFocusOptions.OutlierRejectionConfidence;
+                const int minStarCountForFitting = 5;
+                int totalRejectedPointCount = 0;
                 foreach (var registeredStar in registeredStars) {
-                    if (registeredStar.MatchedStars.Count < 5) {
+                    if (registeredStar.MatchedStars.Count < minStarCountForFitting) {
                         continue;
                     }
 
                     try {
                         var points = registeredStar.MatchedStars.Select(s => new ScatterErrorPoint(s.FocuserPosition, s.Star.HFR, 0.0d, 0.0d)).ToList();
+                        var rejectedPoints = new List<ScatterErrorPoint>();
+                        bool continueFitting;
                         AlglibHyperbolicFitting fitting;
-                        if (autoFocusOptions.UnevenHyperbolicFitEnabled) {
-                            fitting = HyperbolicUnevenFittingAlglib.Create(this.alglibAPI, points, stepSize, autoFocusOptions.WeightedHyperbolicFitEnabled);
-                        } else {
-                            fitting = HyperbolicFittingAlglib.Create(this.alglibAPI, points, autoFocusOptions.WeightedHyperbolicFitEnabled);
-                        }
+                        bool solveResult;
+                        do {
+                            continueFitting = false;
+                            if (autoFocusOptions.UnevenHyperbolicFitEnabled) {
+                                fitting = HyperbolicUnevenFittingAlglib.Create(this.alglibAPI, points, stepSize, autoFocusOptions.WeightedHyperbolicFitEnabled);
+                            } else {
+                                fitting = HyperbolicFittingAlglib.Create(this.alglibAPI, points, autoFocusOptions.WeightedHyperbolicFitEnabled);
+                            }
 
-                        var solveResult = fitting.Solve();
+                            solveResult = fitting.Solve();
+                            if (solveResult && rejectedPoints.Count < maxOutlierRejectedPoints && points.Count > minStarCountForFitting) {
+                                var rejectedPoint = MathUtility.RejectionTest(points: points, fitting: fitting.Fitting, confidence: rejectionConfidence);
+                                if (rejectedPoint != null) {
+                                    rejectedPoints.Add(rejectedPoint);
+                                    points.Remove(rejectedPoint);
+                                    continueFitting = true;
+                                }
+                            }
+                        } while (continueFitting);
+
                         if (!solveResult) {
                             Logger.Trace($"Failed to fit hyperbolic curve to star matches at ({registeredStar.RegistrationX:0.00}, {registeredStar.RegistrationY:0.00})");
                             discardedStarCount++;
@@ -439,6 +461,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                             continue;
                         }
 
+                        totalRejectedPointCount += rejectedPoints.Count;
                         var dataPointX = (registeredStar.RegistrationX - (imageSize.Width / 2.0)) * pixelSize;
                         var dataPointY = (registeredStar.RegistrationY - (imageSize.Height / 2.0)) * pixelSize;
                         var focuserMicrons = fitting.Minimum.X * focuserSizeMicrons;
@@ -452,6 +475,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 stopwatch.RecordEntry("fitcurves");
                 if (discardedStarCount > 0) {
                     Logger.Warning($"Discarded {discardedStarCount} stars during sensor modeling due to poor fits");
+                }
+                if (totalRejectedPointCount > 0) {
+                    Logger.Info($"Rejected {totalRejectedPointCount} points while fitting {sensorModelDataPoints.Count} stars");
                 }
 
                 if (this.inspectorOptions.InterpolationEnabled && sensorModelDataPoints.Count > 5) {

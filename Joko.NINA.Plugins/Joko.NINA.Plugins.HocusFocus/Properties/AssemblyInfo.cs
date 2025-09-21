@@ -10,6 +10,18 @@
 
 #endregion "copyright"
 
+#region "copyright"
+
+/*
+    Copyright © 2021 - 2025 George Hilios <ghilios+NINA@googlemail.com>
+
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.
+*/
+
+#endregion "copyright"
+
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -18,8 +30,8 @@ using System.Runtime.InteropServices;
 
 // [MANDATORY] The assembly versioning
 //Should be incremented for each new release build of a plugin
-[assembly: AssemblyVersion("3.0.0.21")]
-[assembly: AssemblyFileVersion("3.0.0.21")]
+[assembly: AssemblyVersion("3.0.0.22")]
+[assembly: AssemblyFileVersion("3.0.0.22")]
 
 // [MANDATORY] The name of your plugin
 [assembly: AssemblyTitle("Hocus Focus")]
@@ -35,7 +47,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCopyright("Copyright ©  2025")]
 
 // The minimum Version of N.I.N.A. that this plugin is compatible with
-[assembly: AssemblyMetadata("MinimumApplicationVersion", "3.1.2.9001")]
+[assembly: AssemblyMetadata("MinimumApplicationVersion", "3.2.0.2001")]
 
 // The license your plugin code is using
 [assembly: AssemblyMetadata("License", "MPL-2.0")]

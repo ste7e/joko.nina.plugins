@@ -11,12 +11,12 @@
 #endregion "copyright"
 
 using Accord.Math.Optimization.Losses;
+using NINA.Core.Utility;
 using NINA.Joko.Plugins.HocusFocus.Utility;
 using OxyPlot;
 using OxyPlot.Series;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 
@@ -26,6 +26,10 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
         private readonly IAlglibAPI alglibAPI;
 
         private HyperbolicUnevenFittingAlglib(IAlglibAPI alglibAPI, double[][] inputs, double[] inputStdDevs, double[] outputs, int stepSize) {
+            if (stepSize == 0) {
+                throw new ArgumentException("StepSize cannot be zero");
+            }
+
             this.Inputs = inputs;
             this.Outputs = outputs;
             this.StepSize = stepSize;
@@ -150,7 +154,8 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                     } else {
                         reason = "unknown";
                     }
-                    throw new Exception($"Hyperbolic modeling failed with type {rep.terminationtype} and reason: {reason}");
+                    Logger.Error($"Hyperbolic modeling failed with type {rep.terminationtype} and reason: {reason}");
+                    return false;
                 }
 
                 if (OptGuardEnabled) {

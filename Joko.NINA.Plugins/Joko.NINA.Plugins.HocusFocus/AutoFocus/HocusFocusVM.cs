@@ -34,6 +34,7 @@ using OxyPlot;
 using OxyPlot.Series;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -569,7 +570,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             }
 
             FocusPoints.AddSorted(new ScatterErrorPoint(e.FocuserPosition, e.Measurement.Measure, 0, Math.Max(0.001, e.Measurement.Stdev)), focusPointComparer);
-            PlotFocusPoints.AddSorted(new DataPoint(e.FocuserPosition, e.Measurement.Measure), plotPointComparer);
+            var dataPoint = new DataPoint(e.FocuserPosition, e.Measurement.Measure);
+            PlotFocusPoints.AddSorted(dataPoint, plotPointComparer);
+            this.focuserMediator.BroadcastNewAutoFocusPoint(dataPoint);
 
             PlotRejectedFocusPoints.Clear();
             foreach (var rp in e.RejectedPoints) {
@@ -589,6 +592,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         private void AutoFocusEngine_AutoFocusStarted(object sender, AutoFocusStartedEventArgs e) {
             this.ClearCharts();
 
+            this.focuserMediator.BroadcastAutoFocusRunStarting();
             this.LastAutoFocusPoint = new ReportAutoFocusPoint() {
                 Focuspoint = new DataPoint(-1.0d, 0.0d),
                 Temperature = focuserMediator.GetInfo().Temperature,

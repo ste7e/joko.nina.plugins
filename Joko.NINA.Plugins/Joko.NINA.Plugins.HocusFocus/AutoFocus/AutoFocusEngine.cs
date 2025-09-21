@@ -94,30 +94,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
             public ImmutableList<ScatterErrorPoint> RejectedPoints { get; private set; }
 
-            private static ScatterErrorPoint RejectionTest(
-                List<ScatterErrorPoint> points,
-                Func<double, double> fitting,
-                double confidence) {
-                if (points.Count <= 3) {
-                    return null;
-                }
-
-                var errors = points.Select(p => p.Y - fitting(p.X)).ToArray();
-                var (errorsMean, errorsStdDev) = MathNet.Numerics.Statistics.Statistics.MeanStandardDeviation(errors);
-                var N = points.Count;
-                var p = (1.0 - confidence) / (2 * N); // Two-tailed test
-                var t = MathNet.Numerics.Distributions.StudentT.InvCDF(location: 0.0d, scale: 1.0d, freedom: (double)(N - 2), p: p);
-                var t2 = t * t;
-                var grubbZLimit = (double)(N - 1) / Math.Sqrt(N) * Math.Sqrt(t2 / (t2 + N - 2));
-
-                var maxError = errors.Select((e, i) => (e, i)).MaxBy(v => Math.Abs(v.e));
-                var maxErrorZScore = Math.Abs(maxError.e) / errorsStdDev;
-                if (maxErrorZScore < grubbZLimit) {
-                    return null;
-                }
-                return points[maxError.i];
-            }
-
             public static CurveFittingResult Calculate(
                 AutoFocusState state,
                 AFMethodEnum method,
@@ -144,7 +120,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                         if (validFocusPoints.Count >= 3) {
                             if (AFCurveFittingEnum.PARABOLIC == fitting || AFCurveFittingEnum.TRENDPARABOLIC == fitting) {
                                 fittings.QuadraticFitting = new QuadraticFitting().Calculate(validFocusPoints);
-                                rejectedPoint = RejectionTest(points: validFocusPoints, fitting: fittings.QuadraticFitting.Fitting, confidence: rejectionConfidence);
+                                rejectedPoint = MathUtility.RejectionTest(points: validFocusPoints, fitting: fittings.QuadraticFitting.Fitting, confidence: rejectionConfidence);
                             }
 
                             if (AFCurveFittingEnum.HYPERBOLIC == fitting || AFCurveFittingEnum.TRENDHYPERBOLIC == fitting) {
@@ -155,16 +131,17 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                                     hf = HyperbolicFittingAlglib.Create(state.AlglibAPI, validFocusPoints, state.Options.WeightedHyperbolicFitEnabled);
                                 }
                                 if (!hf.Solve()) {
-                                    Logger.Trace($"Hyperbolic fit failed");
+                                    Logger.Error("Hyperbolic fit failed");
+                                } else {
+                                    fittings.HyperbolicFitting = hf;
+                                    rejectedPoint = MathUtility.RejectionTest(points: validFocusPoints, fitting: fittings.HyperbolicFitting.Fitting, confidence: rejectionConfidence);
                                 }
-                                fittings.HyperbolicFitting = hf;
-                                rejectedPoint = RejectionTest(points: validFocusPoints, fitting: fittings.HyperbolicFitting.Fitting, confidence: rejectionConfidence);
                             }
                         }
                     } else if (validFocusPoints.Count >= 3) {
                         fittings.TrendlineFitting = new TrendlineFitting().Calculate(validFocusPoints, method.ToString());
                         fittings.GaussianFitting = new GaussianFitting().Calculate(validFocusPoints);
-                        rejectedPoint = RejectionTest(points: validFocusPoints, fitting: fittings.GaussianFitting.Fitting, confidence: rejectionConfidence);
+                        rejectedPoint = MathUtility.RejectionTest(points: validFocusPoints, fitting: fittings.GaussianFitting.Fitting, confidence: rejectionConfidence);
                     }
 
                     if (rejectedPoint == null || outlierRejectedPoints >= maxOutlierRejectedPoints) {
@@ -1094,6 +1071,10 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 // Evaluate R² for Fittings to be above threshold
                 foreach (var autoFocusRegionState in autoFocusState.FocusRegionStates) {
                     var fittings = autoFocusRegionState.Fittings;
+                    if (fittings == null) {
+                        throw new Exception($"Failed to fit curve to region {autoFocusRegionState.RegionIndex}");
+                    }
+
                     if (rSquaredThreshold > 0) {
                         var hyperbolicBad = fittings.HyperbolicFitting != null && fittings.HyperbolicFitting.RSquared < rSquaredThreshold;
                         var quadraticBad = fittings.QuadraticFitting != null && fittings.QuadraticFitting.RSquared < rSquaredThreshold;
@@ -1395,7 +1376,15 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             });
 
             try {
-                var framesPerPoint = savedFiles.Max(f => f.FrameNumber);
+                var framesPerFile = savedFiles
+                    .GroupBy(f => f.ImageNumber)
+                    .Select(f => new {
+                        ImageNumber = f.Key,
+                        Frames = f.Select(g => g.FrameNumber).Max() + 1
+                    })
+                    .ToList();
+                var framesPerPoint = framesPerFile.Min(f => f.Frames);
+                savedFiles = savedFiles.Where(f => f.FrameNumber < framesPerPoint).ToList();
                 state.Options.FramesPerPoint = framesPerPoint;
                 foreach (var focuserPositionGroup in savedFiles.GroupBy(f => f.FocuserPosition)) {
                     var focuserPosition = focuserPositionGroup.Key;
@@ -1664,9 +1653,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 throw new Exception($"Must be at least {minNumImages} saved AF images in {attemptFolder.FullName}");
             }
 
-            int? stepSize = null;
+            int stepSize = 0;
             if (savedImages.Count >= 2) {
-                var focuserPositions = savedImages.Select(i => i.FocuserPosition).OrderBy(i => i).Take(2).ToList();
+                var focuserPositions = savedImages.Select(i => i.FocuserPosition).Distinct().Order().Take(2).ToList();
                 stepSize = Math.Abs(focuserPositions[0] - focuserPositions[1]);
             }
             return new SavedAutoFocusAttempt() {

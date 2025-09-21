@@ -10,6 +10,7 @@
 
 #endregion "copyright"
 
+using OxyPlot.Series;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -115,6 +116,30 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 ssd += diff * diff;
             }
             return ssd;
+        }
+
+        public static ScatterErrorPoint RejectionTest(
+                List<ScatterErrorPoint> points,
+                Func<double, double> fitting,
+                double confidence) {
+            if (points.Count <= 3) {
+                return null;
+            }
+
+            var errors = points.Select(p => p.Y - fitting(p.X)).ToArray();
+            var (errorsMean, errorsStdDev) = MathNet.Numerics.Statistics.Statistics.MeanStandardDeviation(errors);
+            var N = points.Count;
+            var p = (1.0 - confidence) / (2 * N); // Two-tailed test
+            var t = MathNet.Numerics.Distributions.StudentT.InvCDF(location: 0.0d, scale: 1.0d, freedom: (double)(N - 2), p: p);
+            var t2 = t * t;
+            var grubbZLimit = (double)(N - 1) / Math.Sqrt(N) * Math.Sqrt(t2 / (t2 + N - 2));
+
+            var maxError = errors.Select((e, i) => (e, i)).MaxBy(v => Math.Abs(v.e));
+            var maxErrorZScore = Math.Abs(maxError.e) / errorsStdDev;
+            if (maxErrorZScore < grubbZLimit) {
+                return null;
+            }
+            return points[maxError.i];
         }
     }
 }

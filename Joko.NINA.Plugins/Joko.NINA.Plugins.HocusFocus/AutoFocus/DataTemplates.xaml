@@ -3039,4 +3039,8 @@
             </Grid>
         </ScrollViewer>
     </DataTemplate>
+    <DataTemplate DataType="{x:Type local:InspectorVM}">
+        <ContentPresenter Content="{Binding}"
+                      ContentTemplate="{StaticResource NINA.Joko.Plugins.HocusFocus.AutoFocus.InspectorVM_Dockable}" />
+    </DataTemplate>
 </ResourceDictionary>
