@@ -229,7 +229,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Controls {
         }
 
         protected override Scene GetScene() {
-            return null;
             var tiltPlaneModel = TiltPlaneModel;
             if (tiltPlaneModel == null) {
                 return null;

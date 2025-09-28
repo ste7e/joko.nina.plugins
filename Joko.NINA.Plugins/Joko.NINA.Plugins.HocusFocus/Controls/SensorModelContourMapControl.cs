@@ -276,7 +276,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Controls {
         }
 
         protected override Scene GetScene() {
-            return null;
             var sensorModel = SensorModel;
             if (sensorModel == null) {
                 return null;
