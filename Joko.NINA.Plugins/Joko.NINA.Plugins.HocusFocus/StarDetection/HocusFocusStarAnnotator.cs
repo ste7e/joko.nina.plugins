@@ -277,7 +277,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                         img.Freeze();
                         var hocusFocusDetectorParams = (result as HocusFocusStarDetectionResult)?.DetectorParams;
                         if (hocusFocusDetectorParams != null) {
-                            MaybeSaveIntermediateBitmapSource(img, hocusFocusDetectorParams, "annotated-result.png");
+                            MaybeSaveIntermediateBitmapSource(img, hocusFocusDetectorParams, "annotated-result.tiff");
                         }
 
                         return img;
@@ -294,7 +294,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
 
             var targetPath = Path.Combine(p.SaveIntermediateFilesPath, filename);
             using (var fileStream = new FileStream(targetPath, FileMode.Create)) {
-                BitmapEncoder encoder = new PngBitmapEncoder();
+                BitmapEncoder encoder = new TiffBitmapEncoder();
                 encoder.Frames.Add(BitmapFrame.Create(image));
                 encoder.Save(fileStream);
             }

@@ -112,8 +112,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
             float ssd = 0.0f;
             for (int i = 0; i < x.Length; ++i) {
-                var diff = y[i] - x[i];
-                ssd += diff * diff;
+                ssd += x[i] * y[i];
             }
             return ssd;
         }

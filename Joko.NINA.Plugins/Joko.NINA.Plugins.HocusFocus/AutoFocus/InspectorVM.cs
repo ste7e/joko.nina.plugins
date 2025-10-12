@@ -400,10 +400,10 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                             var img = ImageUtility.ConvertBitmap(newBitmap, PixelFormats.Bgr24);
                             img.Freeze();
 
-                            var filename = $"Registered_Index{outputIndexMap[i]:00}_Focuser{detectedStars.FocuserPosition}.png";
+                            var filename = $"Registered_Index{outputIndexMap[i]:00}_Focuser{detectedStars.FocuserPosition}.tiff";
                             var targetPath = Path.Combine(saveFolder, filename);
                             using (var fileStream = new FileStream(targetPath, FileMode.Create)) {
-                                BitmapEncoder encoder = new PngBitmapEncoder();
+                                BitmapEncoder encoder = new TiffBitmapEncoder();
                                 encoder.Frames.Add(BitmapFrame.Create(img));
                                 encoder.Save(fileStream);
                             }

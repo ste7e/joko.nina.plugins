@@ -474,7 +474,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     var resultTargetPath = Path.Combine(saveAttemptFolder, resultFileName);
                     File.WriteAllText(resultTargetPath, JsonConvert.SerializeObject(analysisResult, Formatting.Indented));
 
-                    var annotatedFileName = $"{imageState.ImageNumber:00}_Frame{imageState.FrameNumber:00}_Region{regionState.RegionIndex:00}_annotated.png";
+                    var annotatedFileName = $"{imageState.ImageNumber:00}_Frame{imageState.FrameNumber:00}_Region{regionState.RegionIndex:00}_annotated.tiff";
                     var annotatedTargetPath = Path.Combine(saveAttemptFolder, annotatedFileName);
                     var annotator = starAnnotatorSelector.GetBehavior();
                     var annotatedImage = await annotator.GetAnnotatedImage(analysisParams, analysisResult, image.Image);
@@ -490,7 +490,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     }
 
                     using (var fileStream = new FileStream(annotatedTargetPath, FileMode.Create)) {
-                        var encoder = new PngBitmapEncoder();
+                        var encoder = new TiffBitmapEncoder();
                         encoder.Frames.Add(BitmapFrame.Create(annotatedImage));
                         encoder.Save(fileStream);
                     }
