@@ -708,7 +708,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             set {
                 if (measurementAverage != value) {
                     measurementAverage = value;
-                    optionsAccessor.SetValueEnum(nameof(MeasurementAverageEnum), value);
+                    optionsAccessor.SetValueEnum(nameof(MeasurementAverage), value);
                     RaisePropertyChanged();
                 }
             }
