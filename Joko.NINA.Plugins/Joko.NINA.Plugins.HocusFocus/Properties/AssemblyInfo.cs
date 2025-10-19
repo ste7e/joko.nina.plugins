@@ -30,8 +30,8 @@ using System.Runtime.InteropServices;
 
 // [MANDATORY] The assembly versioning
 //Should be incremented for each new release build of a plugin
-[assembly: AssemblyVersion("3.0.0.23")]
-[assembly: AssemblyFileVersion("3.0.0.23")]
+[assembly: AssemblyVersion("3.0.0.24")]
+[assembly: AssemblyFileVersion("3.0.0.24")]
 
 // [MANDATORY] The name of your plugin
 [assembly: AssemblyTitle("Hocus Focus")]
