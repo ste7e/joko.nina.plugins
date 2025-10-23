@@ -445,7 +445,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         }
 
                         if (inspectorOptions.RejectBadBrightnessMatches) {
-                            previousRuns.Add(maxNormalisedBrightnessDiff, (pfit, reg));
+                            if (!previousRuns.ContainsKey(maxNormalisedBrightnessDiff))
+                                previousRuns.Add(maxNormalisedBrightnessDiff, (pfit, reg));
 
                             if (retry) {    // keep going in the same direction
                                 Trace.WriteLine($"this brightness tolerance={maxNormalisedBrightnessDiff:#.##}, direction: {direction}");
@@ -574,13 +575,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
         private static List<StarDetectionRegion> CreateFullRegionSet(System.Drawing.Size imageSize, int rows, int cols) {
             var xPart = 1.0d / (double)cols;
             var yPart = 1.0d / (double)rows;
-            var width = xPart * imageSize.Width;
-            var height = yPart * imageSize.Height;
             var regions = new List<StarDetectionRegion>();
             int index = 0;
             for (int r = 0; r < rows; r++)
                 for (int c = 0; c < cols; c++)
-                    regions.Add(new StarDetectionRegion(new RatioRect(c * xPart, r * yPart, width, height), ++index));
+                    regions.Add(new StarDetectionRegion(new RatioRect(c * xPart, r * yPart, xPart, yPart), ++index));
             return regions;
         }
 
@@ -984,7 +983,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                                         AverageBrightness = focuserPositionGroup.Average(g => g.Star.AverageBrightness),
                                         HFR = focuserPositionGroup.Average(g => g.Star.HFR),
                                         MaxBrightness = focuserPositionGroup.Average(g => g.Star.MaxBrightness),
-                                    }
+                                    },
+                                    ImageIndex = focuserPositionGroup.First().ImageIndex
                                 };
                                 rs.MatchedStars.Add(aveStar);
                             }

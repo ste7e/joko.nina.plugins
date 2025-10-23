@@ -61,6 +61,7 @@ using NINA.Image.Interfaces;
 using Accord.Imaging.Filters;
 using System.Drawing;
 using System.Windows.Media.Imaging;
+using System.Diagnostics;
 
 namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
@@ -321,7 +322,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     progress,
                     ct: ct);
 
-                if (!forRerun) {
+                if ((!forRerun) || (inspectorOptions.SaveImagesOnReruns)) {
                     if (!String.IsNullOrEmpty(result.SaveFolder)) {
                         await SaveRegisteredImages(result.SaveFolder, SensorModel.SensorModelResult.RegisteredStars);
                     }
@@ -385,20 +386,26 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                                 var star = registeredStars[starIdx];
                                 var starCenterPen = pens[starIdx % pens.Length];
                                 var annotationBrush = brushes[starIdx % pens.Length];
+                                bool done = false;
                                 foreach (var matchedStar in star.MatchedStars) {
                                     if (matchedStar.ImageIndex == i) {
                                         var boundingBox = matchedStar.Star.BoundingBox;
                                         float starX = matchedStar.Star.Position.X, starY = matchedStar.Star.Position.Y;
                                         var xLength = Math.Max(1.0f, Math.Min(starX - boundingBox.Left, boundingBox.Right - starX)) / 2.0f;
                                         var yLength = Math.Max(1.0f, Math.Min(starY - boundingBox.Top, boundingBox.Bottom - starY)) / 2.0f;
-                                        graphics.DrawLine(
-                                            starCenterPen, starX - xLength, starY, starX + xLength, starY);
-                                        graphics.DrawLine(
-                                            starCenterPen, starX, starY - yLength, starX, starY + yLength);
+                                        //var pushedTranform = graphics.Transform;
+                                        //graphics.TranslateTransform(starX, starY);
+                                        //graphics.RotateTransform((float)starIdx * 360 / registeredStars.Length);
+                                        //graphics.TranslateTransform(-starX, -starY);
+                                        graphics.DrawLine(starCenterPen, starX - xLength, starY, starX + xLength, starY);
+                                        graphics.DrawLine(starCenterPen, starX, starY - yLength, starX, starY + yLength);
                                         graphics.DrawString(starIdx.ToString(), annotationFont, annotationBrush, new PointF(matchedStar.Star.Position.X, matchedStar.Star.Position.Y - yLength));
+                                        //graphics.Transform = pushedTranform;
+                                        //done = true;
                                         break;
                                     }
                                 }
+                                if (done) break;
                             }
 
                             var img = ImageUtility.ConvertBitmap(newBitmap, PixelFormats.Bgr24);
@@ -424,6 +431,12 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     annotationFont.Dispose();
                 }
             })));
+        }
+
+        private PointF rotatePoint(float xOrigin, float yOrigin, float x, float y, double radians) {
+            double cos = Math.Cos(radians);
+            double sin = Math.Sin(radians);
+            return new PointF(xOrigin + (float)((x - xOrigin) * cos - (y - yOrigin) * sin), yOrigin + (float)((x - xOrigin) * sin + (y - yOrigin) * cos));
         }
 
         private Task<bool> TakeAndAnalyzeExposure(IAutoFocusEngine autoFocusEngine, CancellationToken token) {

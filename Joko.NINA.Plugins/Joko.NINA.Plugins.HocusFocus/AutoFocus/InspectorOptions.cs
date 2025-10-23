@@ -433,5 +433,18 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         }
 
         public string BrightnessToleranceHint { get { return $"(auto: {PreviousRunBrightnessDiff:0.##})"; } }
+
+        private bool saveImagesOnReruns = false;
+
+        public bool SaveImagesOnReruns {
+            get => saveImagesOnReruns;
+            set {
+                if (saveImagesOnReruns != value) {
+                    saveImagesOnReruns = value;
+                    optionsAccessor.SetValueBoolean(nameof(SaveImagesOnReruns), saveImagesOnReruns);
+                    RaisePropertyChanged();
+                }
+            }
+        }
     }
 }
