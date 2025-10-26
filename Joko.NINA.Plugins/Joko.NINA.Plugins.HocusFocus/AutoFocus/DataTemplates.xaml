@@ -1521,6 +1521,22 @@
                                 </StackPanel>
 
                                 <TextBlock
+                                    Grid.Row="0"
+                                    Grid.Column="2"
+                                    Margin="5"
+                                    VerticalAlignment="Center"
+                                    Text="Robust RANSAC" />
+                                <StackPanel
+                                    Grid.Row="0"
+                                    Grid.Column="3"
+                                    Orientation="Horizontal">
+                                    <CheckBox
+                                        IsEnabled="{Binding InspectorOptions.UseRANSAC}"
+                                        Margin="5,0,0,0"
+                                        IsChecked="{Binding InspectorOptions.UseRANSACTriangles}" />
+                                </StackPanel>
+
+                                <TextBlock
                                     Grid.Row="1"
                                     Grid.Column="0"
                                     Margin="5"
@@ -1596,7 +1612,7 @@
                                     Grid.Column="0"
                                     Margin="5"
                                     VerticalAlignment="Center"
-                                    Text="Save images when rerunning a saved autofocus" />
+                                    Text="Save annotated images when rerunning a saved autofocus" />
                                 <StackPanel
                                     Grid.Row="4"
                                     Grid.Column="1"

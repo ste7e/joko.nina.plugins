@@ -10,14 +10,12 @@
 
 #endregion "copyright"
 
-using Accord;
 using MathNet.Numerics.LinearAlgebra;
 using NINA.Core.Model;
+using OpenCvSharp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
@@ -32,7 +30,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             NormalisedBrightness = normalisedBrightness;
         }
 
-        public Point2D(Point point) {
+        public Point2D(Accord.Point point) {
             X = point.X;
             Y = point.Y;
             NormalisedBrightness = 0;
@@ -65,9 +63,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         private static Random RNG = new();
 
         // Generate putative matches using nearest neighbor
-        public static (List<Point2D> srcPoints, List<Point2D> dstPoints) GeneratePutativeMatches(
-            List<Point2D> refStars,
-            List<Point2D> targetStars,
+        public static (List<Point2D> srcPoints, List<Point2D> dstPoints) GeneratePutativeMatchesUsingNN(
+            List<Point2D> imageStars,
+            List<Point2D> referenceStars,
             double maxDistance,
             double relativeBrightnessDiff,
             ApplicationStatus status) {
@@ -78,37 +76,181 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             if (status != null) {
                 status.Status3 = "Generating putative matches";
                 status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
-                status.MaxProgress3 = refStars.Count * refStars.Count;
+                status.MaxProgress3 = imageStars.Count * imageStars.Count;
                 status.Progress3 = 0;
             }
-            // For each star in reference image, find closest in target image
-            foreach (var refStar in refStars) {
+            // For each star in this image, find closest match in the reference image
+            foreach (var imageStar in imageStars) {
                 Point2D bestMatch = null;
                 double bestDistance = double.MaxValue;
 
-                foreach (var targetStar in targetStars) {
+                foreach (var referenceStar in referenceStars) {
                     if (status != null) {
-                        status.Progress++;
+                        status.Progress3++;
                     }
-                    if (Math.Abs(refStar.NormalisedBrightness - targetStar.NormalisedBrightness) <= relativeBrightnessDiff) {
-                        double x = refStar.X - targetStar.X;
-                        double y = refStar.Y - targetStar.Y;
+                    if (Math.Abs(imageStar.NormalisedBrightness - referenceStar.NormalisedBrightness) <= relativeBrightnessDiff) {
+                        double x = imageStar.X - referenceStar.X;
+                        double y = imageStar.Y - referenceStar.Y;
                         double distance2 = x * x + y * y;
 
                         if (distance2 < bestDistance && distance2 < maxDistance2) {
                             bestDistance = distance2;
-                            bestMatch = targetStar;
+                            bestMatch = referenceStar;
                         }
                     }
                 }
 
                 if (bestMatch != null) {
-                    srcPoints.Add(refStar);
+                    srcPoints.Add(imageStar);
                     dstPoints.Add(bestMatch);
                 }
             }
 
             return (srcPoints, dstPoints);
+        }
+
+        public class StarTriangle {
+            private List<double> normalizedLengths;
+            private List<double> normalizedBrightnesses;
+
+            public Point2D P1 { get; }
+            public Point2D P2 { get; }
+            public Point2D P3 { get; }
+
+            public StarTriangle(Point2D p1, Point2D p2, Point2D p3) {
+                P1 = p1;
+                P2 = p2;
+                P3 = p3;
+
+                normalizedLengths = normalizeLength();
+                normalizedBrightnesses = normalizeBrightnesses();
+            }
+
+            private List<double> normalizeLength() {
+                var lengths = new List<double> { lineLength(P1, P2), lineLength(P2, P3), lineLength(P3, P1) }.Order().ToList();
+                double shortestLength = lengths.First();
+                lengths.ForEach(l => l = l / shortestLength);
+                return lengths;
+            }
+
+            private List<double> normalizeBrightnesses() {
+                var brightnesses = new List<double> { P1.NormalisedBrightness, P2.NormalisedBrightness, P3.NormalisedBrightness }.Order().ToList();
+                double dimmest = brightnesses.First();
+                brightnesses.ForEach(b => b = b / dimmest);
+                return brightnesses;
+            }
+
+            private double lineLength(Point2D p1, Point2D p2) {
+                double x = p2.X - p1.X;
+                double y = p2.Y - p1.Y;
+                return x * x + y * y;
+            }
+
+            public List<double> NormalizedLengths { get => normalizedLengths; }
+            public List<double> NormalizedBrightnesses { get => normalizedBrightnesses; }
+
+            public bool IsMatchOnLength(StarTriangle other, double tolerance) {
+                for (int i = 0; i < this.NormalizedLengths.Count; i++)
+                    if (Math.Abs(this.NormalizedLengths[0] - other.NormalizedLengths[0]) > tolerance)
+                        return false;
+                return true;
+            }
+
+            public bool IsMatchOnBrightness(StarTriangle other, double tolerance) {
+                for (int i = 0; i < this.NormalizedBrightnesses.Count; i++)
+                    if (Math.Abs(this.NormalizedBrightnesses[0] - other.NormalizedBrightnesses[0]) > tolerance)
+                        return false;
+                return true;
+            }
+
+            public bool IsMatch(StarTriangle other, double brightnessTolerance, double lengthTolerance) {
+                return IsMatchOnLength(other, lengthTolerance) && IsMatchOnBrightness(other, brightnessTolerance);
+            }
+
+            public double[] AsVector() {
+                return new double[] {
+                    NormalizedLengths[0], NormalizedLengths[1], NormalizedLengths[2],
+                    NormalizedBrightnesses[0], NormalizedBrightnesses[1], NormalizedBrightnesses[2]
+                };
+            }
+        }
+
+        public static List<StarTriangle> BuildStarTriangles(List<Point2D> point2Ds, int searchSquareSide) {
+            // first pass - build list of triangles in reference image
+            var triangles = new List<StarTriangle>();
+            for (int i = 0; i < point2Ds.Count; i++) {
+                var p1 = point2Ds[i];
+                var searchArea = new Rect2d(p1.X - searchSquareSide, p1.Y - searchSquareSide, searchSquareSide * 2, searchSquareSide * 2);
+                var nearbyPoints = point2Ds
+                    .Where(p => searchArea.Contains(p.X, p.Y) && (p != p1))
+                    .ToList();
+                if (nearbyPoints.Count > 2)
+                    for (int j = 0; j < nearbyPoints.Count; j++) {
+                        var p2 = nearbyPoints[j];
+                        for (int k = j + 1; k < nearbyPoints.Count; k++) {
+                            var p3 = nearbyPoints[k];
+                            var triangle = new StarTriangle(p1, p2, p3);
+                            triangles.Add(triangle);
+                        }
+                    }
+            }
+            return triangles;
+        }
+
+        // Generate putative matches using triangles
+        public static (List<Point2D> srcPoints, List<Point2D> dstPoints) GeneratePutativeMatchesUsingSimilarTriangles(
+            List<StarTriangle> imageTriangles,
+            List<StarTriangle> referenceTriangles,
+            ApplicationStatus status) {
+            var srcPoints = new List<Point2D>();
+            var dstPoints = new List<Point2D>();
+
+            if (status != null) {
+                status.Status3 = "Generating putative matches (robust)";
+                status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
+                status.MaxProgress3 = imageTriangles.Count * referenceTriangles.Count;
+                status.Progress3 = 0;
+            }
+
+            // For each triangle in the reference image, find closest match in this image
+            double minCosSim = 0.999; // Cosine similarity threshold for accepting a match
+
+            foreach (var referenceTriangle in referenceTriangles) {
+                if (status != null) {
+                    status.Progress3++;
+                }
+                double bestCosSim = minCosSim;
+                StarTriangle bestMatch = null;
+                foreach (var imageTriangle in imageTriangles) {
+                    var cosSim = CosineSimilarity(referenceTriangle.AsVector(), imageTriangle.AsVector());
+
+                    if (cosSim > bestCosSim) {
+                        bestCosSim = cosSim;
+                        bestMatch = imageTriangle;
+                    }
+                }
+                if ((bestMatch != null) && (bestCosSim > minCosSim)) {
+                    srcPoints.AddRange(new List<Point2D> { bestMatch.P1, bestMatch.P2, bestMatch.P3 });
+                    dstPoints.AddRange(new List<Point2D> { referenceTriangle.P1, referenceTriangle.P2, referenceTriangle.P3 });
+                }
+            }
+
+            return (srcPoints, dstPoints);
+        }
+
+        private static double CosineSimilarity(double[] vecA, double[] vecB) {
+            double dotProduct = 0;
+            double magnitudeA = 0;
+            double magnitudeB = 0;
+            for (int i = 0; i < vecA.Length; i++) {
+                dotProduct += vecA[i] * vecB[i];
+                magnitudeA += vecA[i] * vecA[i];
+                magnitudeB += vecB[i] * vecB[i];
+            }
+            if (magnitudeA == 0 || magnitudeB == 0) {
+                return 0;
+            }
+            return dotProduct / (Math.Sqrt(magnitudeA) * Math.Sqrt(magnitudeB));
         }
 
         public static SimilarityTransform EstimateSimilarityTransform(
@@ -133,7 +275,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             for (int i = 0; i < maxIterations; i++) {
                 status.Progress3 = i;
                 progress.Report(status);
-                
+
                 // Randomly select 2 points for similarity transform
                 int[] indices = Enumerable.Range(0, srcPoints.Count).OrderBy(x => RNG.Next()).Take(2).ToArray();
                 var sampleSrc = indices.Select(idx => srcPoints[idx]).ToList();

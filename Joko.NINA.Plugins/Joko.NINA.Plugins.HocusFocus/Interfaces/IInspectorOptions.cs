@@ -72,5 +72,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         double StartingBrightnessDiff { get; set; }
         string BrightnessToleranceHint { get; }
         bool SaveImagesOnReruns { get; set; }
+        bool UseRANSACTriangles { get; set; }
     }
 }
