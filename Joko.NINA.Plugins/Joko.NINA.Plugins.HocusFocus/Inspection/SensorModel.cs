@@ -10,32 +10,25 @@
 
 #endregion "copyright"
 
-using Accord.Statistics.Models.Fields;
 using KdTree;
 using KdTree.Math;
 using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.Core.Utility.Notification;
-using NINA.Image.ImageAnalysis;
 using NINA.Image.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.AutoFocus;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.Utility;
 using NINA.Profile.Interfaces;
-using NINA.WPF.Base.Utility.AutoFocus;
 using OpenCvSharp;
-using OpenCvSharp.Dnn;
 using OxyPlot.Series;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Runtime.ExceptionServices;
-using System.Speech.Recognition;
 using System.Threading;
 using System.Threading.Tasks;
-using static System.Windows.Forms.AxHost;
 
 namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
@@ -337,7 +330,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             }
         }
 
-        private enum IterationDirection { Up, Down };
+        private enum IterationDirection { None, Up, Down };
 
         private (SensorParaboloidModel, RegistrationAndFitResult) RegisterStarsAndFit(
             List<SensorDetectedStars> allDetectedStars,
@@ -676,10 +669,38 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             IProgress<ApplicationStatus> progress) {
             int imagesAligned = 0;
 
-            var targetStars = allDetectedStars[minHfrIndex].StarDetectionResult.StarList
+            var referenceStars = allDetectedStars[minHfrIndex].StarDetectionResult.StarList
                 .Select(s => new Point2D(s.Position.X, s.Position.Y));
             double maxNormalisedBrightnessDiff = .1d;
             int maxDistanceForPutativeMatch = 25;
+
+            // first pass - build list of triangles in reference image
+            int maxTriangleSize;
+            List<RANSACRegistration.StarTriangle> refTriangles;
+            if (inspectorOptions.UseRANSACTriangles) {
+                // aim for ~2000 triangles
+                double sizeAsPortion = 0.03;
+                IterationDirection direction = IterationDirection.None;
+                do {
+                    maxTriangleSize = (int)(sizeAsPortion * Math.Min(imageSize.Width, imageSize.Height));
+                    refTriangles = inspectorOptions.UseRANSACTriangles ? RANSACRegistration.BuildStarTriangles(referenceStars.ToList(), maxTriangleSize) : null;
+                    if ((refTriangles.Count < 1000) && (direction != IterationDirection.Down)) {
+                        direction = IterationDirection.Up;
+                        sizeAsPortion += 0.005;
+                    } else {
+                        if ((refTriangles.Count > 2000) && (direction != IterationDirection.Up)) {
+                            direction = IterationDirection.Down;
+                            sizeAsPortion -= 0.005;
+                        } else {
+                            break;
+                        }
+                    }
+                } while (true);
+            } else {
+                maxTriangleSize = 0;
+                refTriangles = null;
+            }
+
             for (int imageIndex = 0; imageIndex < allDetectedStars.Count; ++imageIndex) {
                 if (imageIndex == minHfrIndex) {
                     continue;
@@ -694,11 +715,24 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 progress.Report(status);
                 var theseStars = allDetectedStars[imageIndex].StarDetectionResult.StarList
                     .Select(s => new Point2D(s.Position.X, s.Position.Y));
-                var (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatches(
+
+                List<Point2D> putativeSrc;
+                List<Point2D> putativeDst;
+                if (inspectorOptions.UseRANSACTriangles) {
+                    // find triangles in this image
+                    var theseTriangles = RANSACRegistration.BuildStarTriangles(theseStars.ToList(), maxTriangleSize);
+                    // match triangles to reference triangles to get putative matches
+                    (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatchesUsingSimilarTriangles(
+                        theseTriangles,
+                        refTriangles,
+                        status);
+                } else {
+                    (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatchesUsingNN(
                     theseStars.ToList(),
-                    targetStars.ToList(),
+                    referenceStars.ToList(),
                     maxDistanceForPutativeMatch, maxNormalisedBrightnessDiff,
-                    null);
+                    status);
+                }
                 try {
                     // calculate the transform needed to register this image
                     var transform = RANSACRegistration.EstimateSimilarityTransform(putativeSrc, putativeDst, status, progress);
@@ -872,11 +906,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             }
 
             int allStarCount = starDict.Count;
-            // remove the dimmest stars so we only keep the brightest ones
             int minMatchPct = 10;   // proportion of images that must have star for star to be included
             double minBrightness = starDict.Keys.OrderBy(s => s.NormalisedBrightness).ElementAt((int)(allStarCount * .05)).NormalisedBrightness; // min set allow 95% of stars
             Trace.WriteLine($"Minimum brightness set to {minBrightness}");
 
+            // remove the dimmest stars so we only keep the brightest ones
             int brightestStarCount = allStarCount;
             if (minBrightness != 0) {
                 foreach (var pt in starDict.Keys.Where(pt => pt.NormalisedBrightness < minBrightness))
@@ -893,45 +927,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 MaxProgress2 = allDetectedStars.Count,
                 ProgressType2 = ApplicationStatus.StatusProgressType.ValueOfMaxValue,
             };
+
             // in other images find stars that are close to the reference image
             for (int i = 0; i < allDetectedStars.Count; ++i) {
-                if (i == minHfrIndex) {
+                if (i == minHfrIndex) { // skip the reference image
                     continue;
                 }
-                status.Progress2 = i;
-                status.Status3 = "Star";
-                status.MaxProgress3 = allDetectedStars[i].StarDetectionResult.StarList.Count;
-                status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
-                status.Progress3 = 0;
-                foreach (var star in allDetectedStars[i].StarDetectionResult.StarList
-                    .Select(star => (HocusFocusDetectedStar)star)) {
-                    status.Progress3++;
-                    progress.Report(status);
-
-                    var searchPoint = new Point2D(star.Position.X, star.Position.Y, star.NormalisedBrightness);
-                    var searchArea = new Rect2d(searchPoint.X - searchSquareSide, searchPoint.Y - searchSquareSide, searchSquareSide * 2 + 1, searchSquareSide * 2 + 1);
-                    // find a star in the reference image that is within the search area and closest to the current star
-                    var starKeysInArea = starDict.Keys
-                        .Where(p => searchArea.Contains(p.X, p.Y));
-                    var refStar =
-                        (maxRelativeBrightnessDiff == -1 ?
-                            starKeysInArea :
-                            starKeysInArea.Where(p => (Math.Abs(star.NormalisedBrightness - p.NormalisedBrightness) < maxRelativeBrightnessDiff))
-                        )
-                        .OrderBy(p => DistanceSquared(p, searchPoint))
-                        .FirstOrDefault();
-                    if (maxRelativeBrightnessDiff != -1) {
-                        rejectionsOnBrightness += starKeysInArea
-                                .Where(p => (Math.Abs(star.NormalisedBrightness - p.NormalisedBrightness) >= maxRelativeBrightnessDiff)).Count();
-                    }
-                    if (refStar != null) {
-                        starDict[refStar].Add(new MatchedStar() {
-                            FocuserPosition = allDetectedStars[i].FocuserPosition,
-                            Star = (HocusFocusDetectedStar)star,
-                            ImageIndex = i
-                        });
-                    }
-                }
+                rejectionsOnBrightness = MatchStarsByNN(allDetectedStars, searchSquareSide, maxRelativeBrightnessDiff, progress, starDict, status, i);
             }
 
             stopwatch.RecordEntry("Match");
@@ -1008,6 +1010,53 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             }
             Trace.WriteLine($"{starCount} stars were registered and matched to stars in other images.  Stars on enough images are {registeredStars.Length}");
             return (registeredStars, rejectionsOnBrightness);
+        }
+
+        private static int MatchStarsByNN(
+            List<SensorDetectedStars> allDetectedStars,
+            int searchSquareSide,
+            double maxRelativeBrightnessDiff,
+            IProgress<ApplicationStatus> progress,
+            Dictionary<Point2D, List<MatchedStar>> starDict,
+            ApplicationStatus status,
+            int imageIndex) {
+            int rejectionsOnBrightness = 0;
+            status.Progress2 = imageIndex;
+            status.Status3 = "Star";
+            status.MaxProgress3 = allDetectedStars[imageIndex].StarDetectionResult.StarList.Count;
+            status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
+            status.Progress3 = 0;
+            foreach (var star in allDetectedStars[imageIndex].StarDetectionResult.StarList
+                .Select(star => (HocusFocusDetectedStar)star)) {
+                status.Progress3++;
+                progress.Report(status);
+
+                var searchPoint = new Point2D(star.Position.X, star.Position.Y, star.NormalisedBrightness);
+                var searchArea = new Rect2d(searchPoint.X - searchSquareSide, searchPoint.Y - searchSquareSide, searchSquareSide * 2 + 1, searchSquareSide * 2 + 1);
+                // find a star in the reference image that is within the search area and closest to the current star
+                var starKeysInArea = starDict.Keys
+                    .Where(p => searchArea.Contains(p.X, p.Y));
+                var refStar =
+                    (maxRelativeBrightnessDiff == -1 ?
+                        starKeysInArea :
+                        starKeysInArea.Where(p => (Math.Abs(star.NormalisedBrightness - p.NormalisedBrightness) < maxRelativeBrightnessDiff))
+                    )
+                    .OrderBy(p => DistanceSquared(p, searchPoint))
+                    .FirstOrDefault();
+                if (maxRelativeBrightnessDiff != -1) {
+                    rejectionsOnBrightness += starKeysInArea
+                            .Where(p => (Math.Abs(star.NormalisedBrightness - p.NormalisedBrightness) >= maxRelativeBrightnessDiff)).Count();
+                }
+                if (refStar != null) {
+                    starDict[refStar].Add(new MatchedStar() {
+                        FocuserPosition = allDetectedStars[imageIndex].FocuserPosition,
+                        Star = (HocusFocusDetectedStar)star,
+                        ImageIndex = imageIndex
+                    });
+                }
+            }
+
+            return rejectionsOnBrightness;
         }
 
         private static double DistanceSquared(Point2D p1, Point2D p2) {
