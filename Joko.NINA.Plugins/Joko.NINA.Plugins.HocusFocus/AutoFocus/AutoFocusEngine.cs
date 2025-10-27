@@ -1678,7 +1678,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             return new SavedAutoFocusAttempt() {
                 Attempt = attemptNumber,
                 SavedImages = savedImages,
-                StepSize = stepSize
+                StepSize = stepSize,
+                FolderPath = attemptFolder.FullName
             };
         }
 

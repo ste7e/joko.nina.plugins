@@ -10,18 +10,29 @@
 
 #endregion "copyright"
 
+using Accord.Imaging.Filters;
+using ILNumerics;
+using Newtonsoft.Json;
+using NINA.Astrometry;
 using NINA.Core.Enum;
 using NINA.Core.Interfaces;
 using NINA.Core.Model;
 using NINA.Core.Model.Equipment;
 using NINA.Core.Utility;
 using NINA.Core.Utility.Notification;
+using NINA.Equipment.Equipment;
+using NINA.Equipment.Equipment.MyCamera;
+using NINA.Equipment.Equipment.MyFocuser;
+using NINA.Equipment.Equipment.MyTelescope;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.Equipment.Interfaces.ViewModel;
 using NINA.Equipment.Model;
 using NINA.Image.ImageAnalysis;
+using NINA.Image.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.Controls;
+using NINA.Joko.Plugins.HocusFocus.Inspection;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
+using NINA.Joko.Plugins.HocusFocus.Scottplot;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.Utility;
 using NINA.Profile.Interfaces;
@@ -32,36 +43,25 @@ using NINA.WPF.Base.ViewModel.AutoFocus;
 using OxyPlot;
 using OxyPlot.Series;
 using ScottPlot;
+using ScottPlot.Statistics;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
-
-using Logger = NINA.Core.Utility.Logger;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using DrawingColor = System.Drawing.Color;
+using Logger = NINA.Core.Utility.Logger;
 using SPPlot = ScottPlot.Plot;
 using SPVector2 = ScottPlot.Statistics.Vector2;
-using ScottPlot.Statistics;
-using System.Windows.Media;
-using NINA.Equipment.Equipment.MyCamera;
-using NINA.Equipment.Equipment.MyFocuser;
-using NINA.Equipment.Equipment;
-using Newtonsoft.Json;
-using System.IO;
-using NINA.Joko.Plugins.HocusFocus.Scottplot;
-using NINA.Astrometry;
-using NINA.Equipment.Equipment.MyTelescope;
-using NINA.Joko.Plugins.HocusFocus.Inspection;
-using NINA.Image.Interfaces;
-using Accord.Imaging.Filters;
-using System.Drawing;
-using System.Windows.Media.Imaging;
-using System.Diagnostics;
 
 namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
@@ -324,7 +324,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
                 if ((!forRerun) || (inspectorOptions.SaveImagesOnReruns)) {
                     if (!String.IsNullOrEmpty(result.SaveFolder)) {
-                        await SaveRegisteredImages(result.SaveFolder, SensorModel.SensorModelResult.RegisteredStars);
+                        await SaveRegisteredImages(result.SaveFolder, SensorModel.SensorModelResult.RegisteredStars, SensorModel.TrianglesByImage);
                     }
                 }
             }
@@ -337,7 +337,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
         private async Task SaveRegisteredImages(
             String saveFolder,
-            SensorModel.RegisteredStar[] registeredStars) {
+            SensorModel.RegisteredStar[] registeredStars,
+            Dictionary<int, List<RANSACRegistration.StarTriangle>> trianglesByImage) {
             if (string.IsNullOrWhiteSpace(saveFolder)) {
                 Logger.Error("SavePath empty. Not saving registered images");
                 return;
@@ -375,6 +376,11 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     System.Drawing.FontStyle.Regular,
                     GraphicsUnit.Point);
 
+                var triPenUnmatched = new System.Drawing.Pen(Colors.DarkCyan.ToDrawingColor());
+                var triPenMatched = new System.Drawing.Pen(Colors.Yellow.ToDrawingColor());
+                var triPenReferenceColor = Colors.White.ToDrawingColor();
+                var triPenReferenceBrush = new SolidBrush(triPenReferenceColor);
+                var triPenReference = new System.Drawing.Pen(triPenReferenceBrush);
                 try {
                     using (var bmp = ImageUtility.Convert16BppTo8Bpp(imageToAnnotate)) {
                         using (var newBitmap = new Bitmap(bmp.Width, bmp.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb)) {
@@ -400,12 +406,37 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                                         graphics.DrawLine(starCenterPen, starX - xLength, starY, starX + xLength, starY);
                                         graphics.DrawLine(starCenterPen, starX, starY - yLength, starX, starY + yLength);
                                         graphics.DrawString(starIdx.ToString(), annotationFont, annotationBrush, new PointF(matchedStar.Star.Position.X, matchedStar.Star.Position.Y - yLength));
+
                                         //graphics.Transform = pushedTranform;
                                         //done = true;
                                         break;
                                     }
                                 }
                                 if (done) break;
+                            }
+
+                            if (trianglesByImage != null) {
+                                //foreach (var tri in trianglesByImage[i].Where(t => !t.IsReference && !t.Matched)) {
+                                //    graphics.DrawLine(triPenUnmatched, tri.P1.AsPointF(), tri.P2.AsPointF());
+                                //    graphics.DrawLine(triPenUnmatched, tri.P2.AsPointF(), tri.P3.AsPointF());
+                                //    graphics.DrawLine(triPenUnmatched, tri.P3.AsPointF(), tri.P1.AsPointF());
+                                //}
+                                foreach (var tri in trianglesByImage[i].Where(t => !t.IsReference && t.Matched)) {
+                                    graphics.DrawLine(triPenMatched, tri.P1.AsPointF(), tri.P2.AsPointF());
+                                    graphics.DrawLine(triPenMatched, tri.P2.AsPointF(), tri.P3.AsPointF());
+                                    graphics.DrawLine(triPenMatched, tri.P3.AsPointF(), tri.P1.AsPointF());
+                                    graphics.DrawString(tri.MatchString, annotationFont, triPenReferenceBrush, tri.P1.AsPointF());
+                                    graphics.DrawString(tri.MatchString, annotationFont, triPenReferenceBrush, tri.P2.AsPointF());
+                                    graphics.DrawString(tri.MatchString, annotationFont, triPenReferenceBrush, tri.P3.AsPointF());
+                                }
+                                foreach (var tri in trianglesByImage[i].Where(t => t.IsReference)) {
+                                    graphics.DrawLine(triPenReference, tri.P1.AsPointF(), tri.P2.AsPointF());
+                                    graphics.DrawLine(triPenReference, tri.P2.AsPointF(), tri.P3.AsPointF());
+                                    graphics.DrawLine(triPenReference, tri.P3.AsPointF(), tri.P1.AsPointF());
+                                    graphics.DrawString(tri.MatchString, annotationFont, triPenReferenceBrush, tri.P1.AsPointF());
+                                    graphics.DrawString(tri.MatchString, annotationFont, triPenReferenceBrush, tri.P2.AsPointF());
+                                    graphics.DrawString(tri.MatchString, annotationFont, triPenReferenceBrush, tri.P3.AsPointF());
+                                }
                             }
 
                             var img = ImageUtility.ConvertBitmap(newBitmap, PixelFormats.Bgr24);
@@ -431,12 +462,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     annotationFont.Dispose();
                 }
             })));
-        }
-
-        private PointF rotatePoint(float xOrigin, float yOrigin, float x, float y, double radians) {
-            double cos = Math.Cos(radians);
-            double sin = Math.Sin(radians);
-            return new PointF(xOrigin + (float)((x - xOrigin) * cos - (y - yOrigin) * sin), yOrigin + (float)((x - xOrigin) * sin + (y - yOrigin) * cos));
         }
 
         private Task<bool> TakeAndAnalyzeExposure(IAutoFocusEngine autoFocusEngine, CancellationToken token) {
@@ -752,12 +777,14 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 }
 
                 savedAttempt = autoFocusEngine.LoadSavedAutoFocusAttempt(selectedPath);
+                selectedPath = savedAttempt.FolderPath;
             } catch (Exception e) {
                 Notification.ShowError(e.Message);
                 Logger.Error($"Failed to load saved auto focus attempt from {selectedPath}");
                 return false;
             }
 
+            string outputFolder = null;
             localAnalyzeTask = Task.Run(async () => {
                 var options = GetAutoFocusEngineOptions(autoFocusEngine, savedAttempt);
                 var sensorCurveModelEnabled = inspectorOptions.SensorCurveModelEnabled;
@@ -780,6 +807,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     DeactivateAutoFocusAnalysis();
                     return false;
                 }
+
+                outputFolder = result.SaveFolder;
 
                 var autoFocusAnalysisResult = await AnalyzeAutoFocusResult(
                     options,
@@ -844,6 +873,10 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 DeactivateAutoFocusAnalysis();
                 return false;
             } catch (Exception e) {
+                if ((inspectorOptions.SaveImagesOnReruns) && (outputFolder != null)) {
+                    await SaveRegisteredImages(outputFolder, SensorModel.SensorModelResult.RegisteredStars, SensorModel.TrianglesByImage);
+                }
+
                 Notification.ShowError($"Inspection auto focus rerun analysis failed: {e.Message}");
                 InspectorErrorText = $"Inspection AutoFocus Rerun analysis failed\n{e.Message}";
                 Logger.Error("Inspection auto focus rerun analysis failed", e);
