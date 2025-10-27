@@ -15,6 +15,7 @@ using NINA.Core.Model;
 using OpenCvSharp;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 
 namespace NINA.Joko.Plugins.HocusFocus.Utility {
@@ -34,6 +35,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             X = point.X;
             Y = point.Y;
             NormalisedBrightness = 0;
+        }
+
+        public PointF AsPointF() {
+            return new PointF((float)X, (float)Y);
         }
     }
 
@@ -59,7 +64,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         }
     }
 
-    internal class RANSACRegistration {
+    public class RANSACRegistration {
         private static Random RNG = new();
 
         // Generate putative matches using nearest neighbor
@@ -110,17 +115,24 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         }
 
         public class StarTriangle {
+            private int referenceID;
             private List<double> normalizedLengths;
             private List<double> normalizedBrightnesses;
+            private bool matched;
+            private bool isReference;   // just used for annotating images with triangles
+            private double matchScore;
 
             public Point2D P1 { get; }
             public Point2D P2 { get; }
             public Point2D P3 { get; }
 
-            public StarTriangle(Point2D p1, Point2D p2, Point2D p3) {
+            public StarTriangle(Point2D p1, Point2D p2, Point2D p3, bool isReference, int referenceID) {
                 P1 = p1;
                 P2 = p2;
                 P3 = p3;
+                this.isReference = isReference;
+                if (isReference)
+                    this.referenceID = referenceID;
 
                 normalizedLengths = normalizeLength();
                 normalizedBrightnesses = normalizeBrightnesses();
@@ -173,26 +185,60 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                     NormalizedBrightnesses[0], NormalizedBrightnesses[1], NormalizedBrightnesses[2]
                 };
             }
+
+            public bool Matched { get => matched; }
+            public bool IsReference { get => isReference; }
+            public int ReferenceID { get => referenceID; }
+
+            public override string ToString() {
+                return $"StarTriangle: ({P1.X}, {P1.Y}), ({P2.X}, {P2.Y}), ({P3.X}, {P3.Y})";
+            }
+
+            public void MarkAsMatched(int referenceID, double matchScore) {
+                matched = true;
+                this.referenceID = referenceID;
+                this.matchScore = matchScore;
+            }
+
+            public string MatchString {
+                get { return $"{ReferenceID} ({matchScore:0.#########})"; }
+            }
         }
 
-        public static List<StarTriangle> BuildStarTriangles(List<Point2D> point2Ds, int searchSquareSide) {
+        public static List<StarTriangle> BuildStarTriangles(List<Point2D> point2Ds, int searchSquareSide, bool onePerPoint, bool isReference) {
             // first pass - build list of triangles in reference image
             var triangles = new List<StarTriangle>();
+            var pointsUsed = new HashSet<Point2D>();
+            int id = 0;
             for (int i = 0; i < point2Ds.Count; i++) {
-                var p1 = point2Ds[i];
-                var searchArea = new Rect2d(p1.X - searchSquareSide, p1.Y - searchSquareSide, searchSquareSide * 2, searchSquareSide * 2);
+                if (pointsUsed.Contains(point2Ds[i]))
+                    continue;
+                var pt = point2Ds[i];
+                var searchArea = new Rect2d(pt.X - searchSquareSide, pt.Y - searchSquareSide, searchSquareSide * 2, searchSquareSide * 2);
                 var nearbyPoints = point2Ds
-                    .Where(p => searchArea.Contains(p.X, p.Y) && (p != p1))
+                    .Where(p => !pointsUsed.Contains(p) && searchArea.Contains(p.X, p.Y) && (p != pt))
+                    .OrderBy(p => (p.X * p.X + p.Y * p.Y) - (pt.X * pt.X + pt.Y * pt.Y))
                     .ToList();
-                if (nearbyPoints.Count > 2)
+                if (onePerPoint) {
+                    if (nearbyPoints.Count > 2) {
+                        triangles.Add(new StarTriangle(pt, nearbyPoints[0], nearbyPoints[1], isReference, id++));
+                        pointsUsed.Add(pt);
+                        pointsUsed.Add(nearbyPoints[0]);
+                        pointsUsed.Add(nearbyPoints[1]);
+                    }
+                } else {
                     for (int j = 0; j < nearbyPoints.Count; j++) {
                         var p2 = nearbyPoints[j];
                         for (int k = j + 1; k < nearbyPoints.Count; k++) {
                             var p3 = nearbyPoints[k];
-                            var triangle = new StarTriangle(p1, p2, p3);
+                            var triangle = new StarTriangle(pt, p2, p3, isReference, id++);
                             triangles.Add(triangle);
+                            //pointsUsed.Add(pt);
+                            //pointsUsed.Add(p2);
+                            //pointsUsed.Add(p3);
                         }
                     }
+                }
             }
             return triangles;
         }
@@ -213,7 +259,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
 
             // For each triangle in the reference image, find closest match in this image
-            double minCosSim = 0.999; // Cosine similarity threshold for accepting a match
+            double minCosSim = 0.99; // Cosine similarity threshold for accepting a match
 
             foreach (var referenceTriangle in referenceTriangles) {
                 if (status != null) {
@@ -221,7 +267,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 }
                 double bestCosSim = minCosSim;
                 StarTriangle bestMatch = null;
-                foreach (var imageTriangle in imageTriangles) {
+                foreach (var imageTriangle in imageTriangles.Where(t => !t.Matched)) {
                     var cosSim = CosineSimilarity(referenceTriangle.AsVector(), imageTriangle.AsVector());
 
                     if (cosSim > bestCosSim) {
@@ -232,6 +278,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 if ((bestMatch != null) && (bestCosSim > minCosSim)) {
                     srcPoints.AddRange(new List<Point2D> { bestMatch.P1, bestMatch.P2, bestMatch.P3 });
                     dstPoints.AddRange(new List<Point2D> { referenceTriangle.P1, referenceTriangle.P2, referenceTriangle.P3 });
+                    bestMatch.MarkAsMatched(referenceTriangle.ReferenceID, bestCosSim);
                 }
             }
 
