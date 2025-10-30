@@ -415,7 +415,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                                 if (done) break;
                             }
 
-                            if (trianglesByImage != null) {
+                            if ((trianglesByImage != null) && (trianglesByImage.Count > i)) {
                                 //foreach (var tri in trianglesByImage[i].Where(t => !t.IsReference && !t.Matched)) {
                                 //    graphics.DrawLine(triPenUnmatched, tri.P1.AsPointF(), tri.P2.AsPointF());
                                 //    graphics.DrawLine(triPenUnmatched, tri.P2.AsPointF(), tri.P3.AsPointF());

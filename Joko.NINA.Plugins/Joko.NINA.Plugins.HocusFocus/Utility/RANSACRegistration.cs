@@ -15,6 +15,7 @@ using NINA.Core.Model;
 using OpenCvSharp;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 
@@ -39,6 +40,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
         public PointF AsPointF() {
             return new PointF((float)X, (float)Y);
+        }
+
+        public string ToString() {
+            return $"{X}, {Y} ({NormalisedBrightness})";
         }
     }
 
@@ -141,14 +146,16 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             private List<double> normalizeLength() {
                 var lengths = new List<double> { lineLength(P1, P2), lineLength(P2, P3), lineLength(P3, P1) }.Order().ToList();
                 double shortestLength = lengths.First();
-                lengths.ForEach(l => l = l / shortestLength);
+                for (int i = 0; i < lengths.Count; i++)
+                    lengths[i] /= shortestLength;
                 return lengths;
             }
 
             private List<double> normalizeBrightnesses() {
                 var brightnesses = new List<double> { P1.NormalisedBrightness, P2.NormalisedBrightness, P3.NormalisedBrightness }.Order().ToList();
                 double dimmest = brightnesses.First();
-                brightnesses.ForEach(b => b = b / dimmest);
+                for (int i = 0; i < brightnesses.Count; i++)
+                    brightnesses[i] /= dimmest;
                 return brightnesses;
             }
 
@@ -161,27 +168,30 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             public List<double> NormalizedLengths { get => normalizedLengths; }
             public List<double> NormalizedBrightnesses { get => normalizedBrightnesses; }
 
-            public bool IsMatchOnLength(StarTriangle other, double tolerance) {
-                for (int i = 0; i < this.NormalizedLengths.Count; i++)
-                    if (Math.Abs(this.NormalizedLengths[0] - other.NormalizedLengths[0]) > tolerance)
-                        return false;
-                return true;
-            }
+            //public bool IsMatchOnLength(StarTriangle other, double tolerance) {
+            //    for (int i = 0; i < this.NormalizedLengths.Count; i++)
+            //        if (Math.Abs(this.NormalizedLengths[0] - other.NormalizedLengths[0]) > tolerance)
+            //            return false;
+            //    return true;
+            //}
 
-            public bool IsMatchOnBrightness(StarTriangle other, double tolerance) {
-                for (int i = 0; i < this.NormalizedBrightnesses.Count; i++)
-                    if (Math.Abs(this.NormalizedBrightnesses[0] - other.NormalizedBrightnesses[0]) > tolerance)
-                        return false;
-                return true;
-            }
+            //public bool IsMatchOnBrightness(StarTriangle other, double tolerance) {
+            //    for (int i = 0; i < this.NormalizedBrightnesses.Count; i++)
+            //        if (Math.Abs(this.NormalizedBrightnesses[0] - other.NormalizedBrightnesses[0]) > tolerance)
+            //            return false;
+            //    return true;
+            //}
 
-            public bool IsMatch(StarTriangle other, double brightnessTolerance, double lengthTolerance) {
-                return IsMatchOnLength(other, lengthTolerance) && IsMatchOnBrightness(other, brightnessTolerance);
-            }
+            //public bool IsMatch(StarTriangle other, double brightnessTolerance, double lengthTolerance) {
+            //    return IsMatchOnLength(other, lengthTolerance) && IsMatchOnBrightness(other, brightnessTolerance);
+            //}
 
             public double[] AsVector() {
                 return new double[] {
-                    NormalizedLengths[0], NormalizedLengths[1], NormalizedLengths[2],
+                    P1.X, P1.Y,
+                    P2.X, P2.Y,
+                    P3.X, P3.Y,
+                    //NormalizedLengths[0], NormalizedLengths[1], NormalizedLengths[2],
                     NormalizedBrightnesses[0], NormalizedBrightnesses[1], NormalizedBrightnesses[2]
                 };
             }
@@ -217,7 +227,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 var searchArea = new Rect2d(pt.X - searchSquareSide, pt.Y - searchSquareSide, searchSquareSide * 2, searchSquareSide * 2);
                 var nearbyPoints = point2Ds
                     .Where(p => !pointsUsed.Contains(p) && searchArea.Contains(p.X, p.Y) && (p != pt))
-                    .OrderBy(p => (p.X * p.X + p.Y * p.Y) - (pt.X * pt.X + pt.Y * pt.Y))
+                    .OrderBy(p => calcDistance(p, pt))
                     .ToList();
                 if (onePerPoint) {
                     if (nearbyPoints.Count > 2) {
@@ -243,6 +253,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             return triangles;
         }
 
+        private static double calcDistance(Point2D p1, Point2D p2) {
+            return (p2.X - p1.X) * (p2.X - p1.X) + (p2.Y - p1.Y) * (p2.Y - p1.Y);
+        }
+
         // Generate putative matches using triangles
         public static (List<Point2D> srcPoints, List<Point2D> dstPoints) GeneratePutativeMatchesUsingSimilarTriangles(
             List<StarTriangle> imageTriangles,
@@ -259,9 +273,12 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
 
             // For each triangle in the reference image, find closest match in this image
-            double minCosSim = 0.99; // Cosine similarity threshold for accepting a match
+            double minCosSim = 0.99995; // Cosine similarity threshold for accepting a match
 
             foreach (var referenceTriangle in referenceTriangles) {
+                if (referenceTriangle.ReferenceID == 36) {
+                    int a = 1;
+                }
                 if (status != null) {
                     status.Progress3++;
                 }
@@ -319,12 +336,20 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             status.Status3 = "Transform iteration";
             status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
             status.MaxProgress3 = maxIterations;
+            int nonRand1 = 0;
+            int nonRand2 = 1;
             for (int i = 0; i < maxIterations; i++) {
                 status.Progress3 = i;
                 progress.Report(status);
 
                 // Randomly select 2 points for similarity transform
-                int[] indices = Enumerable.Range(0, srcPoints.Count).OrderBy(x => RNG.Next()).Take(2).ToArray();
+                int[] indices = { nonRand1, nonRand2 };// Enumerable.Range(0, srcPoints.Count).OrderBy(x => RNG.Next()).Take(2).ToArray();
+                if (++nonRand2>=srcPoints.Count) {
+                    if (++nonRand1>=srcPoints.Count) {
+                        break;
+                    }
+                    nonRand2 = 0;
+                }
                 var sampleSrc = indices.Select(idx => srcPoints[idx]).ToList();
                 var sampleDst = indices.Select(idx => dstPoints[idx]).ToList();
 

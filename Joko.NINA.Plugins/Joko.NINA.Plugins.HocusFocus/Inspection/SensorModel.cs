@@ -371,7 +371,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 int ransacAligned = 0;
                 if (inspectorOptions.UseRANSAC) {
                     ransacAligned = AlignStarsWithRANSAC(allDetectedStars, imageSize, stopwatch, minHfrIndex, progress);
-                    if (ransacAligned == allDetectedStars.Count) {
+                    if (ransacAligned < allDetectedStars.Count) {
                         Trace.WriteLine("Ransac failed, reverting to non-aligned processing");
                     }
                 }
@@ -437,53 +437,54 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                             bestBrightnessDiff = maxNormalisedBrightnessDiff;
                         }
 
-                        if (inspectorOptions.RejectBadBrightnessMatches) {
-                            if (!previousRuns.ContainsKey(maxNormalisedBrightnessDiff))
-                                previousRuns.Add(maxNormalisedBrightnessDiff, (pfit, reg));
+                        if (previousRuns.ContainsKey(maxNormalisedBrightnessDiff)) {
+                            previousRuns[maxNormalisedBrightnessDiff] = (pfit, reg);
+                        } else {
+                            previousRuns.Add(maxNormalisedBrightnessDiff, (pfit, reg));
+                        }
 
-                            if (retry) {    // keep going in the same direction
-                                Trace.WriteLine($"this brightness tolerance={maxNormalisedBrightnessDiff:#.##}, direction: {direction}");
-                                if (direction == IterationDirection.Up) {
-                                    if ((maxNormalisedBrightnessDiff >= 3) || (rejectionsOnBrightnessDiff == 0)) {    // if there're no rejections at the current level don't increase tolerance
-                                        upExhausted = true;
-                                    }
-                                    if ((pfit != null && !IsFitTooGood(pfit) && (!IsBetterFit(pfit, prevFit)) || upExhausted)) { // change direction unless already exhausted
-                                        if (downExhausted) { // all tried, no retry
-                                            retry = false;
-                                        } else {
-                                            if (maxNormalisedBrightnessDiff != inspectorOptions.PreviousRunBrightnessDiff)
-                                                upExhausted = true;
-                                            maxNormalisedBrightnessDiff = inspectorOptions.PreviousRunBrightnessDiff / 1.5;
-                                            direction = IterationDirection.Down;
-                                            Trace.WriteLine($"Switching direction to {direction}");
-                                        }
+                        if (retry) {    // keep going in the same direction
+                            Trace.WriteLine($"this brightness tolerance={maxNormalisedBrightnessDiff:#.##}, direction: {direction}");
+                            if (direction == IterationDirection.Up) {
+                                if ((maxNormalisedBrightnessDiff >= 3) || (rejectionsOnBrightnessDiff == 0)) {    // if there're no rejections at the current level don't increase tolerance
+                                    upExhausted = true;
+                                }
+                                if ((pfit != null && !IsFitTooGood(pfit) && (!IsBetterFit(pfit, prevFit)) || upExhausted)) { // change direction unless already exhausted
+                                    if (downExhausted) { // all tried, no retry
+                                        retry = false;
                                     } else {
-                                        maxNormalisedBrightnessDiff *= 1.5;
-                                        direction = IterationDirection.Up;
-                                    }
-                                } else {
-                                    if (maxNormalisedBrightnessDiff <= 0.01d)
-                                        downExhausted = true;
-                                    if ((pfit != null && !IsFitTooGood(pfit) && (!IsBetterFit(pfit, prevFit)) || downExhausted)) { // need to switch direction unless already exhausted
-                                        if (upExhausted) { // all tried, no retry
-                                            retry = false;
-                                        } else {
-                                            if (maxNormalisedBrightnessDiff != inspectorOptions.PreviousRunBrightnessDiff)
-                                                downExhausted = true;
-                                            maxNormalisedBrightnessDiff = inspectorOptions.PreviousRunBrightnessDiff * 1.5;
-                                            direction = IterationDirection.Up;
-                                            Trace.WriteLine($"Switching direction to {direction}");
-                                        }
-                                    } else {
-                                        maxNormalisedBrightnessDiff /= 1.5;
+                                        if (maxNormalisedBrightnessDiff != inspectorOptions.PreviousRunBrightnessDiff)
+                                            upExhausted = true;
+                                        maxNormalisedBrightnessDiff = inspectorOptions.PreviousRunBrightnessDiff / 1.5;
                                         direction = IterationDirection.Down;
+                                        Trace.WriteLine($"Switching direction to {direction}");
                                     }
-                                }
-                                if (retry) {
-                                    Trace.WriteLine($"next brightness tolerance={maxNormalisedBrightnessDiff:#.##}, direction: {direction}");
                                 } else {
-                                    Trace.WriteLine("No more iterations");
+                                    maxNormalisedBrightnessDiff *= 1.5;
+                                    direction = IterationDirection.Up;
                                 }
+                            } else {
+                                if (maxNormalisedBrightnessDiff <= 0.01d)
+                                    downExhausted = true;
+                                if ((pfit != null && !IsFitTooGood(pfit) && (!IsBetterFit(pfit, prevFit)) || downExhausted)) { // need to switch direction unless already exhausted
+                                    if (upExhausted) { // all tried, no retry
+                                        retry = false;
+                                    } else {
+                                        if (maxNormalisedBrightnessDiff != inspectorOptions.PreviousRunBrightnessDiff)
+                                            downExhausted = true;
+                                        maxNormalisedBrightnessDiff = inspectorOptions.PreviousRunBrightnessDiff * 1.5;
+                                        direction = IterationDirection.Up;
+                                        Trace.WriteLine($"Switching direction to {direction}");
+                                    }
+                                } else {
+                                    maxNormalisedBrightnessDiff /= 1.5;
+                                    direction = IterationDirection.Down;
+                                }
+                            }
+                            if (retry) {
+                                Trace.WriteLine($"next brightness tolerance={maxNormalisedBrightnessDiff:#.##}, direction: {direction}");
+                            } else {
+                                Trace.WriteLine("No more iterations");
                             }
                         }
 
@@ -497,11 +498,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         bestReg = reg;
                         bestBrightnessDiff = maxNormalisedBrightnessDiff;
                     }
+                    Trace.WriteLine($"After {iterations} iterations best fit is {bestPfit?.GoodnessOfFit:#.##}");
                 }
 
                 progress.Report(new ApplicationStatus());
-
-                Trace.WriteLine($"After {iterations} iterations best fit is {bestPfit?.GoodnessOfFit:#.##}");
 
                 inspectorOptions.PreviousRunBrightnessDiff = bestBrightnessDiff;
                 previousRuns.Select(r => (r.Key, r.Value.Item1?.GoodnessOfFit, r.Value.Item1?.StarsInModel))
@@ -672,18 +672,19 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             int imagesAligned = 0;
 
             var referenceStars = allDetectedStars[minHfrIndex].StarDetectionResult.StarList
-                .Select(s => new Point2D(s.Position.X, s.Position.Y));
+                .Select(s => new Point2D(s.Position.X, s.Position.Y, ((HocusFocusDetectedStar)s).NormalisedBrightness));
             double maxNormalisedBrightnessDiff = .1d;
             int maxDistanceForPutativeMatch = 25;
 
             // first pass - build list of triangles in reference image
             int maxTriangleSize;
             List<RANSACRegistration.StarTriangle> refTriangles;
+            TrianglesByImage = new Dictionary<int, List<RANSACRegistration.StarTriangle>>();
+
             if (inspectorOptions.UseRANSACTriangles) {
                 // aim for ~2000 triangles
                 double sizeAsPortion = 0.355;
                 //IterationDirection direction = IterationDirection.None;
-                TrianglesByImage = new Dictionary<int, List<RANSACRegistration.StarTriangle>>();
                 //do {
                 maxTriangleSize = (int)(sizeAsPortion * Math.Min(imageSize.Width, imageSize.Height));
                 refTriangles = inspectorOptions.UseRANSACTriangles ? RANSACRegistration.BuildStarTriangles(referenceStars.ToList(), maxTriangleSize, true, true) : null;
@@ -718,7 +719,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 };
                 progress.Report(status);
                 var theseStars = allDetectedStars[imageIndex].StarDetectionResult.StarList
-                    .Select(s => new Point2D(s.Position.X, s.Position.Y));
+                    .Select(s => new Point2D(s.Position.X, s.Position.Y, ((HocusFocusDetectedStar)s).NormalisedBrightness));
 
                 List<Point2D> putativeSrc;
                 List<Point2D> putativeDst;
@@ -734,12 +735,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         status);
                 } else {
                     (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatchesUsingNN(
-                    theseStars.ToList(),
-                    referenceStars.ToList(),
-                    maxDistanceForPutativeMatch, maxNormalisedBrightnessDiff,
-                    status);
+                        theseStars.ToList(),
+                        referenceStars.ToList(),
+                        maxDistanceForPutativeMatch, maxNormalisedBrightnessDiff,
+                        status);
                 }
                 try {
+                    Trace.WriteLine($"Image {imageIndex}, putative star matches: {putativeDst.Count}");
                     // calculate the transform needed to register this image
                     var transform = RANSACRegistration.EstimateSimilarityTransform(putativeSrc, putativeDst, status, progress);
 
@@ -755,6 +757,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 }
             }
 
+            Trace.WriteLine($"RANSAC alignment: {imagesAligned} / {allDetectedStars.Count} images were successfully aligned");
             stopwatch.RecordEntry("RANSAC alignment");
             return imagesAligned;
         }
@@ -936,7 +939,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             stopwatch.RecordEntry("Match");
 
             int starCount = starDict.Count;
-            int minStarsPerRegion = starCount / regions.Count / 4;  // minimum of 25% of detected stars must be matched
+            int minStarsPerRegion = Math.Max(starCount / regions.Count / 4, 15);  // minimum of 25% of detected stars must be matched or 15 whichever is higher
             Trace.WriteLine($"MinStarsPerRegion set to {minStarsPerRegion} ({starCount} total stars)");
             Dictionary<Rect2d, int> starsPerRegion = new Dictionary<Rect2d, int>(regions.Count); // item1=stars in the region that are matched, item2=stars in the region
             regions.ForEach(r => {
@@ -992,11 +995,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         }).ToArray();
 
                     registeredStars = registeredStars.Concat(registeredStarsInRegion).ToArray();
-                    if (matchCount > minStarsPerRegion) { // enough stars so stop now
-                        Trace.WriteLine($"Region {region.Index}: {matchCount} stars matched with with matchPct set to {matchPct}");
-                        break;
-                    }
-                    Trace.WriteLine($"Region {region.Index}: Too few stars ({matchCount}) with matchPct set to {matchPct}");
+                    //if (matchCount > minStarsPerRegion) { // enough stars so stop now
+                    //    Trace.WriteLine($"Region {region.Index}: {matchCount} stars matched with with matchPct set to {matchPct}");
+                    //    break;
+                    //}
+                    //Trace.WriteLine($"Region {region.Index}: Too few stars ({matchCount}) with matchPct set to {matchPct}");
                 }
             }
 
@@ -1023,6 +1026,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             status.MaxProgress3 = allDetectedStars[imageIndex].StarDetectionResult.StarList.Count;
             status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
             status.Progress3 = 0;
+            int matches = 0;
+            double totalDistance = 0;
             foreach (var star in allDetectedStars[imageIndex].StarDetectionResult.StarList
                 .Select(star => (HocusFocusDetectedStar)star)) {
                 status.Progress3++;
@@ -1033,7 +1038,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 // find a star in the reference image that is within the search area and closest to the current star
                 var starKeysInArea = starDict.Keys
                     .Where(p => searchArea.Contains(p.X, p.Y));
-                var refStar =
+                var refStarPos =
                     (maxRelativeBrightnessDiff == -1 ?
                         starKeysInArea :
                         starKeysInArea.Where(p => (Math.Abs(star.NormalisedBrightness - p.NormalisedBrightness) < maxRelativeBrightnessDiff))
@@ -1044,15 +1049,19 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     rejectionsOnBrightness += starKeysInArea
                             .Where(p => (Math.Abs(star.NormalisedBrightness - p.NormalisedBrightness) >= maxRelativeBrightnessDiff)).Count();
                 }
-                if (refStar != null) {
-                    starDict[refStar].Add(new MatchedStar() {
+                if (refStarPos != null) {
+                    double distance = Math.Sqrt(DistanceSquared(refStarPos, searchPoint));
+                    starDict[refStarPos].Add(new MatchedStar() {
                         FocuserPosition = allDetectedStars[imageIndex].FocuserPosition,
                         Star = (HocusFocusDetectedStar)star,
                         ImageIndex = imageIndex
                     });
+                    totalDistance += distance;
+                    matches++;
                 }
             }
 
+            Trace.WriteLine($"Image {imageIndex}: MatchNN: matches={matches}, average distance={totalDistance / matches:0.####}");
             return rejectionsOnBrightness;
         }
 
