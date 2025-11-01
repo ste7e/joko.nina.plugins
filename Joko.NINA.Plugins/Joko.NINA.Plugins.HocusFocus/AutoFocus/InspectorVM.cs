@@ -376,6 +376,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     System.Drawing.FontStyle.Regular,
                     GraphicsUnit.Point);
 
+                var infoBrush = new SolidBrush(Colors.White.ToDrawingColor());
                 var triPenUnmatched = new System.Drawing.Pen(Colors.DarkCyan.ToDrawingColor());
                 var triPenMatched = new System.Drawing.Pen(Colors.Yellow.ToDrawingColor());
                 var triPenReferenceColor = Colors.White.ToDrawingColor();
@@ -399,16 +400,25 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                                         float starX = matchedStar.Star.Position.X, starY = matchedStar.Star.Position.Y;
                                         var xLength = Math.Max(1.0f, Math.Min(starX - boundingBox.Left, boundingBox.Right - starX)) / 2.0f;
                                         var yLength = Math.Max(1.0f, Math.Min(starY - boundingBox.Top, boundingBox.Bottom - starY)) / 2.0f;
-                                        //var pushedTranform = graphics.Transform;
-                                        //graphics.TranslateTransform(starX, starY);
-                                        //graphics.RotateTransform((float)starIdx * 360 / registeredStars.Length);
-                                        //graphics.TranslateTransform(-starX, -starY);
+
                                         graphics.DrawLine(starCenterPen, starX - xLength, starY, starX + xLength, starY);
                                         graphics.DrawLine(starCenterPen, starX, starY - yLength, starX, starY + yLength);
                                         graphics.DrawString(starIdx.ToString(), annotationFont, annotationBrush, new PointF(matchedStar.Star.Position.X, matchedStar.Star.Position.Y - yLength));
 
-                                        //graphics.Transform = pushedTranform;
-                                        //done = true;
+                                        if (matchedStar.Star.OriginalPosition != matchedStar.Star.Position) {
+                                            // image has been aligned with reference - draw line
+                                            graphics.DrawLine(starCenterPen, starX, starY, matchedStar.Star.OriginalPosition.X, matchedStar.Star.OriginalPosition.Y);
+                                        }
+
+                                        if (matchedStar.Star.ReferenceImage == -1) {
+                                            graphics.DrawString($"Image: {matchedStar.ImageIndex}, Not aligned", annotationFont, infoBrush, new PointF(0, 0));
+                                        } else {
+                                            if (matchedStar.Star.ReferenceImage == matchedStar.ImageIndex) {
+                                                graphics.DrawString($"Image: {matchedStar.ImageIndex}, Reference image", annotationFont, infoBrush, new PointF(0, 0));
+                                            } else {
+                                                graphics.DrawString($"Image: {matchedStar.ImageIndex}, Ref: {matchedStar.Star.ReferenceImage}", annotationFont, infoBrush, new PointF(0, 0));
+                                            }
+                                        }
                                         break;
                                     }
                                 }

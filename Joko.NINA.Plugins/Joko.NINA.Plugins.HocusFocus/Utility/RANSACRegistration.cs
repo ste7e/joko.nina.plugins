@@ -42,7 +42,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             return new PointF((float)X, (float)Y);
         }
 
-        public string ToString() {
+        public override string ToString() {
             return $"{X}, {Y} ({NormalisedBrightness})";
         }
     }
@@ -67,6 +67,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             double y = Scale * (sinTheta * point.X + cosTheta * point.Y) + Ty;
             return new Point2D(x, y);
         }
+
+        public override string ToString() {
+            return $"S:{Scale}, R:{Rotation}, Tx:{Tx}, Ty:{Ty}";
+        }
     }
 
     public class RANSACRegistration {
@@ -86,7 +90,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             if (status != null) {
                 status.Status3 = "Generating putative matches";
                 status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
-                status.MaxProgress3 = imageStars.Count * imageStars.Count;
+                status.MaxProgress3 = imageStars.Count * referenceStars.Count;
                 status.Progress3 = 0;
             }
             // For each star in this image, find closest match in the reference image
@@ -99,9 +103,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                         status.Progress3++;
                     }
                     if (Math.Abs(imageStar.NormalisedBrightness - referenceStar.NormalisedBrightness) <= relativeBrightnessDiff) {
-                        double x = imageStar.X - referenceStar.X;
-                        double y = imageStar.Y - referenceStar.Y;
-                        double distance2 = x * x + y * y;
+                        double distance2 = calcDistance(imageStar, referenceStar);
 
                         if (distance2 < bestDistance && distance2 < maxDistance2) {
                             bestDistance = distance2;
@@ -123,6 +125,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             private int referenceID;
             private List<double> normalizedLengths;
             private List<double> normalizedBrightnesses;
+            private List<Point2D> normalizedPoints;
             private bool matched;
             private bool isReference;   // just used for annotating images with triangles
             private double matchScore;
@@ -131,7 +134,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             public Point2D P2 { get; }
             public Point2D P3 { get; }
 
-            public StarTriangle(Point2D p1, Point2D p2, Point2D p3, bool isReference, int referenceID) {
+            public StarTriangle(System.Drawing.Size imageSize, double minBrightness, double maxBrightness, Point2D p1, Point2D p2, Point2D p3, bool isReference, int referenceID) {
                 P1 = p1;
                 P2 = p2;
                 P3 = p3;
@@ -139,8 +142,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 if (isReference)
                     this.referenceID = referenceID;
 
-                normalizedLengths = normalizeLength();
-                normalizedBrightnesses = normalizeBrightnesses();
+                //normalizedLengths = normalizeLength();
+                //normalizedBrightnesses = normalizeBrightnesses(minBrightness, maxBrightness);
+                normalizedPoints = normalizePositions(imageSize, minBrightness, maxBrightness);
             }
 
             private List<double> normalizeLength() {
@@ -151,12 +155,24 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 return lengths;
             }
 
-            private List<double> normalizeBrightnesses() {
-                var brightnesses = new List<double> { P1.NormalisedBrightness, P2.NormalisedBrightness, P3.NormalisedBrightness }.Order().ToList();
-                double dimmest = brightnesses.First();
-                for (int i = 0; i < brightnesses.Count; i++)
-                    brightnesses[i] /= dimmest;
+            private List<double> normalizeBrightnesses(double minBrightness, double maxBrightness) {
+                var brightnesses = new List<double> { P1.NormalisedBrightness, P2.NormalisedBrightness, P3.NormalisedBrightness }.ToList();
+                double range = maxBrightness - minBrightness;
+                for (int i = 0; i < brightnesses.Count; i++) {
+                    brightnesses[i] = (brightnesses[i] - minBrightness) / range;
+                }
                 return brightnesses;
+            }
+
+            private List<Point2D> normalizePositions(System.Drawing.Size imageSize, double minBrightness, double maxBrightness) {
+                var normPos = new List<Point2D>();
+                foreach (var p in new List<Point2D> { P1, P2, P3 }) {
+                    normPos.Add(new Point2D(
+                        p.X / imageSize.Width,
+                        p.Y / imageSize.Height,
+                        (p.NormalisedBrightness - minBrightness) / (maxBrightness - minBrightness)));
+                }
+                return normPos;
             }
 
             private double lineLength(Point2D p1, Point2D p2) {
@@ -188,11 +204,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
             public double[] AsVector() {
                 return new double[] {
-                    P1.X, P1.Y,
-                    P2.X, P2.Y,
-                    P3.X, P3.Y,
-                    //NormalizedLengths[0], NormalizedLengths[1], NormalizedLengths[2],
-                    NormalizedBrightnesses[0], NormalizedBrightnesses[1], NormalizedBrightnesses[2]
+                    normalizedPoints[0].X, normalizedPoints[0].Y, normalizedPoints[0].NormalisedBrightness,
+                    normalizedPoints[1].X, normalizedPoints[1].Y, normalizedPoints[1].NormalisedBrightness,
+                    normalizedPoints[2].X, normalizedPoints[2].Y, normalizedPoints[2].NormalisedBrightness,
                 };
             }
 
@@ -215,11 +229,15 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
         }
 
-        public static List<StarTriangle> BuildStarTriangles(List<Point2D> point2Ds, int searchSquareSide, bool onePerPoint, bool isReference) {
+        public static List<StarTriangle> BuildStarTriangles(System.Drawing.Size imageSize, List<Point2D> point2Ds, int searchSquareSide, bool onePerPoint, bool isReference) {
             // first pass - build list of triangles in reference image
             var triangles = new List<StarTriangle>();
             var pointsUsed = new HashSet<Point2D>();
             int id = 0;
+            var brightnesses = point2Ds.Select(p => p.NormalisedBrightness).Order();
+            var minBrightness = brightnesses.First();
+            var maxBrightness = brightnesses.Last();
+
             for (int i = 0; i < point2Ds.Count; i++) {
                 if (pointsUsed.Contains(point2Ds[i]))
                     continue;
@@ -231,7 +249,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                     .ToList();
                 if (onePerPoint) {
                     if (nearbyPoints.Count > 2) {
-                        triangles.Add(new StarTriangle(pt, nearbyPoints[0], nearbyPoints[1], isReference, id++));
+                        triangles.Add(new StarTriangle(imageSize, minBrightness, maxBrightness, pt, nearbyPoints[0], nearbyPoints[1], isReference, id++));
                         pointsUsed.Add(pt);
                         pointsUsed.Add(nearbyPoints[0]);
                         pointsUsed.Add(nearbyPoints[1]);
@@ -241,7 +259,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                         var p2 = nearbyPoints[j];
                         for (int k = j + 1; k < nearbyPoints.Count; k++) {
                             var p3 = nearbyPoints[k];
-                            var triangle = new StarTriangle(pt, p2, p3, isReference, id++);
+                            var triangle = new StarTriangle(imageSize, minBrightness, maxBrightness, pt, p2, p3, isReference, id++);
                             triangles.Add(triangle);
                             //pointsUsed.Add(pt);
                             //pointsUsed.Add(p2);
@@ -273,12 +291,12 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
 
             // For each triangle in the reference image, find closest match in this image
-            double minCosSim = 0.99995; // Cosine similarity threshold for accepting a match
+            double minCosSim = 0.9997; // Cosine similarity threshold for accepting a match
 
             foreach (var referenceTriangle in referenceTriangles) {
-                if (referenceTriangle.ReferenceID == 36) {
-                    int a = 1;
-                }
+                //if (referenceTriangle.ReferenceID == 36) {
+                //    int a = 1;
+                //}
                 if (status != null) {
                     status.Progress3++;
                 }
@@ -322,36 +340,36 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             List<Point2D> dstPoints,
             ApplicationStatus status,
             IProgress<ApplicationStatus> progress,
-            int maxIterations = 1000,
-            double inlierThreshold = 25,    // 5.0^2
+            int maxIterations = 10000,
+            double inlierThreshold = 9,    // 3.0^2
             int minInliers = 4) {
             if (srcPoints.Count != dstPoints.Count || srcPoints.Count < 2) {
                 throw new ArgumentException("At least 2 corresponding points are required.");
             }
 
-            int bestInlierCount = 0;
             List<int> bestInlierIndices = new List<int>();
+            double bestInlierAveDistance = double.MaxValue;
             SimilarityTransform bestTransform = null;
 
             status.Status3 = "Transform iteration";
             status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
             status.MaxProgress3 = maxIterations;
-            int nonRand1 = 0;
-            int nonRand2 = 1;
-            for (int i = 0; i < maxIterations; i++) {
-                status.Progress3 = i;
+
+            // build randomized list of pairs of points
+            List<(int, int)> randIndices = new List<(int, int)>();
+            for (int i = 0; i < srcPoints.Count; i++) {
+                for (int j = i + 1; j < srcPoints.Count; j++) {
+                    randIndices.Add((i, j));
+                }
+            }
+            randIndices = randIndices.OrderBy(x => RNG.Next()).Take(maxIterations).ToList();
+
+            foreach ((int idx1, int idx2) in randIndices) {
+                status.Progress3++;
                 progress.Report(status);
 
-                // Randomly select 2 points for similarity transform
-                int[] indices = { nonRand1, nonRand2 };// Enumerable.Range(0, srcPoints.Count).OrderBy(x => RNG.Next()).Take(2).ToArray();
-                if (++nonRand2>=srcPoints.Count) {
-                    if (++nonRand1>=srcPoints.Count) {
-                        break;
-                    }
-                    nonRand2 = 0;
-                }
-                var sampleSrc = indices.Select(idx => srcPoints[idx]).ToList();
-                var sampleDst = indices.Select(idx => dstPoints[idx]).ToList();
+                var sampleSrc = new List<Point2D>() { srcPoints[idx1], srcPoints[idx2] };
+                var sampleDst = new List<Point2D>() { dstPoints[idx1], dstPoints[idx2] };
 
                 // Estimate transformation from sample
                 var transform = FitSimilarityTransform(sampleSrc, sampleDst);
@@ -359,31 +377,37 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
                 // Count inliers
                 List<int> inlierIndices = new List<int>();
+                double inlierDistanceTotal = 0;
                 for (int j = 0; j < srcPoints.Count; j++) {
                     var transformedPoint = transform.Transform(srcPoints[j]);
-                    double distX = transformedPoint.X - dstPoints[j].X;
-                    double distY = transformedPoint.Y - dstPoints[j].Y;
-                    double distance = distX * distX + distY * distY;
+                    double distance = calcDistance(transformedPoint, dstPoints[j]);
                     if (distance < inlierThreshold) {
                         inlierIndices.Add(j);
+                        inlierDistanceTotal += distance;
                     }
                 }
 
+                double aveInlierDistance = inlierDistanceTotal / inlierIndices.Count;
+
+                //Trace.WriteLine($"{idx1},{idx2}: {sampleSrc[0]}, {sampleSrc[1]} -> {sampleDst[0]}, {sampleDst[1]} = {transform}, {inlierIndices.Count*100/srcPoints.Count:0.####}%");
+
                 // Update best model if more inliers
-                if (inlierIndices.Count > bestInlierCount && inlierIndices.Count >= minInliers) {
-                    bestInlierCount = inlierIndices.Count;
+                if ((inlierIndices.Count > bestInlierIndices.Count) || ((inlierIndices.Count == bestInlierIndices.Count) && (aveInlierDistance < bestInlierAveDistance))) {
                     bestInlierIndices = inlierIndices;
+                    bestInlierAveDistance = aveInlierDistance;
                 }
             }
 
             // Refine transformation using all inliers
-            if (bestInlierCount >= minInliers) {
+            if (bestInlierIndices.Count >= minInliers) {
                 var inlierSrc = bestInlierIndices.Select(idx => srcPoints[idx]).ToList();
                 var inlierDst = bestInlierIndices.Select(idx => dstPoints[idx]).ToList();
                 bestTransform = FitSimilarityTransform(inlierSrc, inlierDst);
             } else {
                 throw new InvalidOperationException("Not enough inliers to compute transformation.");
             }
+
+            Trace.WriteLine($"Best: {bestTransform} {bestInlierIndices.Count * 100 / srcPoints.Count:0.####}% aveDist:{bestInlierAveDistance:0.###} iterations:{randIndices.Count}");
 
             return bestTransform;
         }

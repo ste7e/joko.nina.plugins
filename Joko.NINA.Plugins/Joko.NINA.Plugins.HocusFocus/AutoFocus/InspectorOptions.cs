@@ -61,7 +61,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             rejectBadBrightnessMatches = optionsAccessor.GetValueBoolean(nameof(RejectBadBrightnessMatches), false);
             rejectBadlyFittingMatches = optionsAccessor.GetValueBoolean(nameof(RejectBadlyFittingMatches), false);
             useRANSAC = optionsAccessor.GetValueBoolean(nameof(UseRANSAC), true);
-            useTrees = optionsAccessor.GetValueBoolean(nameof(UseTrees), false);
+            useAlternativeMatchinguseTrees = optionsAccessor.GetValueBoolean(nameof(UseAlternativeMatching), false);
             saveImagesOnReruns = optionsAccessor.GetValueBoolean(nameof(SaveImagesOnReruns), false);
             useRANSACTriangles = optionsAccessor.GetValueBoolean(nameof(UseRANSACTriangles), false);
         }
@@ -368,14 +368,14 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             }
         }
 
-        private bool useTrees = false;
+        private bool useAlternativeMatchinguseTrees = false;
 
-        public bool UseTrees {
-            get => useTrees;
+        public bool UseAlternativeMatching {
+            get => useAlternativeMatchinguseTrees;
             set {
-                if (useTrees != value) {
-                    useTrees = value;
-                    optionsAccessor.SetValueBoolean(nameof(UseTrees), useTrees);
+                if (useAlternativeMatchinguseTrees != value) {
+                    useAlternativeMatchinguseTrees = value;
+                    optionsAccessor.SetValueBoolean(nameof(UseAlternativeMatching), useAlternativeMatchinguseTrees);
                     RaisePropertyChanged();
                 }
             }

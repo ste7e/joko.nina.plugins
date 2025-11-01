@@ -1541,12 +1541,12 @@
                                     Grid.Column="0"
                                     Margin="5"
                                     VerticalAlignment="Center"
-                                    Text="Match using trees" />
+                                    Text="Alternative matching logic" />
                                 <StackPanel
                                     Grid.Row="1"
                                     Grid.Column="1"
                                     Orientation="Horizontal">
-                                    <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.UseTrees}" />
+                                    <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.UseAlternativeMatching}" />
                                 </StackPanel>
 
                                 <TextBlock
