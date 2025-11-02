@@ -970,19 +970,19 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             int starCount = starDict.Count;
             int minStarsPerRegion = Math.Max(starCount / regions.Count / 4, 15);  // minimum of 25% of detected stars must be matched or 15 whichever is higher
             Trace.WriteLine($"MinStarsPerRegion set to {minStarsPerRegion} ({starCount} total stars)");
-            Dictionary<Rect2d, int> starsPerRegion = new Dictionary<Rect2d, int>(regions.Count); // item1=stars in the region that are matched, item2=stars in the region
-            regions.ForEach(r => {
-                Rect2d rect = r.OuterBoundary.ToRect2D(imageSize);
-                if (!starsPerRegion.ContainsKey(rect))
-                    starsPerRegion.Add(rect, 0);
-            });
+            //Dictionary<Rect2d, int> starsPerRegion = new Dictionary<Rect2d, int>(regions.Count);
+            //regions.ForEach(r => {
+            //    Rect2d rect = r.OuterBoundary.ToRect2D(imageSize);
+            //    if (!starsPerRegion.ContainsKey(rect))
+            //        starsPerRegion.Add(rect, 0);
+            //});
 
-            foreach (var pt in starDict.Keys) {
-                starsPerRegion.Keys
-                                .Where(r => r.Contains(pt.X, pt.Y))
-                                .ToList()
-                                .ForEach(r => starsPerRegion[r]++);
-            }
+            //foreach (var pt in starDict.Keys) {
+            //    starsPerRegion.Keys
+            //                    .Where(r => r.Contains(pt.X, pt.Y))
+            //                    .ToList()
+            //                    .ForEach(r => starsPerRegion[r]++);
+            //}
             status.Status = "Examining region";
             status.MaxProgress = regions.Count;
             status.ProgressType = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
@@ -991,9 +991,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 status.Progress++;
                 progress.Report(status);
 
+                RegisteredStar[] registeredStarsInRegion = new RegisteredStar[0];
                 for (int matchPct = 100; matchPct > minMatchPct; matchPct -= 10) {
                     int matchCount = 0;
-                    var registeredStarsInRegion = starDict.Keys
+                    registeredStarsInRegion = starDict.Keys
                         .Where(pt => (region.OuterBoundary.ToRect2D(imageSize).Contains(pt.X, pt.Y)) &&    // just this region
                                     (starDict[pt].Count >= allDetectedStars.Count * matchPct / 100))   // only use stars that are matched by matchPct% of the images
                         .Select(pt => {
@@ -1023,13 +1024,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                             return rs;
                         }).ToArray();
 
-                    registeredStars = registeredStars.Concat(registeredStarsInRegion).ToArray();
-                    //if (matchCount > minStarsPerRegion) { // enough stars so stop now
-                    //    Trace.WriteLine($"Region {region.Index}: {matchCount} stars matched with with matchPct set to {matchPct}");
-                    //    break;
-                    //}
-                    //Trace.WriteLine($"Region {region.Index}: Too few stars ({matchCount}) with matchPct set to {matchPct}");
+                    if (matchCount > minStarsPerRegion) { // enough stars so stop now
+                        Trace.WriteLine($"Region {region.Index}: {matchCount} stars matched with with matchPct set to {matchPct}");
+                        break;
+                    }
+                    Trace.WriteLine($"Region {region.Index}: Too few stars ({matchCount}) with matchPct set to {matchPct}");
                 }
+                registeredStars = registeredStars.Concat(registeredStarsInRegion).ToArray();
             }
 
             stopwatch.RecordEntry("NonTree-based registration");
