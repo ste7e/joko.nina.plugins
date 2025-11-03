@@ -145,8 +145,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 P2 = p2;
                 P3 = p3;
                 this.isReference = isReference;
-                if (isReference)
+                if (isReference) {
                     this.referenceID = referenceID;
+                }
 
                 //normalizedLengths = normalizeLength();
                 //normalizedBrightnesses = normalizeBrightnesses(minBrightness, maxBrightness);
@@ -156,8 +157,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             private List<double> normalizeLength() {
                 var lengths = new List<double> { lineLength(P1, P2), lineLength(P2, P3), lineLength(P3, P1) }.Order().ToList();
                 double shortestLength = lengths.First();
-                for (int i = 0; i < lengths.Count; i++)
+                for (int i = 0; i < lengths.Count; i++) {
                     lengths[i] /= shortestLength;
+                }
                 return lengths;
             }
 
