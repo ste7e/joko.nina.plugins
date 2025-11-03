@@ -38,6 +38,12 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             NormalisedBrightness = 0;
         }
 
+        public Point2D(System.Drawing.Point point) {
+            X = point.X;
+            Y = point.Y;
+            NormalisedBrightness = 0;
+        }
+
         public PointF AsPointF() {
             return new PointF((float)X, (float)Y);
         }
@@ -202,11 +208,19 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             //    return IsMatchOnLength(other, lengthTolerance) && IsMatchOnBrightness(other, brightnessTolerance);
             //}
 
-            public double[] AsVector() {
+            public double[] AsPositionVector() {
                 return new double[] {
-                    normalizedPoints[0].X, normalizedPoints[0].Y, normalizedPoints[0].NormalisedBrightness,
-                    normalizedPoints[1].X, normalizedPoints[1].Y, normalizedPoints[1].NormalisedBrightness,
-                    normalizedPoints[2].X, normalizedPoints[2].Y, normalizedPoints[2].NormalisedBrightness,
+                    normalizedPoints[0].X, normalizedPoints[0].Y, //normalizedPoints[0].NormalisedBrightness,
+                    normalizedPoints[1].X, normalizedPoints[1].Y, //normalizedPoints[1].NormalisedBrightness,
+                    normalizedPoints[2].X, normalizedPoints[2].Y, //normalizedPoints[2].NormalisedBrightness,
+                };
+            }
+
+            public double[] AsBrightnessVector() {
+                return new double[] {
+                    normalizedPoints[0].NormalisedBrightness,
+                    normalizedPoints[1].NormalisedBrightness,
+                    normalizedPoints[2].NormalisedBrightness,
                 };
             }
 
@@ -291,7 +305,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
 
             // For each triangle in the reference image, find closest match in this image
-            double minCosSim = 0.9997; // Cosine similarity threshold for accepting a match
+            double minCosSim = 0.9999; // Cosine similarity threshold for accepting a match
 
             foreach (var referenceTriangle in referenceTriangles) {
                 //if (referenceTriangle.ReferenceID == 36) {
@@ -300,20 +314,36 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 if (status != null) {
                     status.Progress3++;
                 }
-                double bestCosSim = minCosSim;
+                double bestCosSimLoc = minCosSim;
                 StarTriangle bestMatch = null;
+                List<(StarTriangle, double)> matches = new();
                 foreach (var imageTriangle in imageTriangles.Where(t => !t.Matched)) {
-                    var cosSim = CosineSimilarity(referenceTriangle.AsVector(), imageTriangle.AsVector());
+                    var cosSim = CosineSimilarity(referenceTriangle.AsPositionVector(), imageTriangle.AsPositionVector());
 
-                    if (cosSim > bestCosSim) {
-                        bestCosSim = cosSim;
+                    if (cosSim > bestCosSimLoc) {
+                        matches.Add((imageTriangle, cosSim));
+                        bestCosSimLoc = cosSim;
                         bestMatch = imageTriangle;
                     }
                 }
-                if ((bestMatch != null) && (bestCosSim > minCosSim)) {
+                // examine matches and pick best on brightness
+                double bestCosSimBri = 0;
+
+                if (matches.Count > 1) {
+                    foreach (var (tri, cs) in matches) {
+                        var cosSim = CosineSimilarity(referenceTriangle.AsBrightnessVector(), tri.AsBrightnessVector());
+
+                        if (cosSim > bestCosSimBri) {
+                            bestMatch = tri;
+                            bestCosSimBri = cosSim;
+                        }
+                    }
+                }
+
+                if ((bestMatch != null) && (bestCosSimLoc > minCosSim)) {
                     srcPoints.AddRange(new List<Point2D> { bestMatch.P1, bestMatch.P2, bestMatch.P3 });
                     dstPoints.AddRange(new List<Point2D> { referenceTriangle.P1, referenceTriangle.P2, referenceTriangle.P3 });
-                    bestMatch.MarkAsMatched(referenceTriangle.ReferenceID, bestCosSim);
+                    bestMatch.MarkAsMatched(referenceTriangle.ReferenceID, bestCosSimLoc);
                 }
             }
 

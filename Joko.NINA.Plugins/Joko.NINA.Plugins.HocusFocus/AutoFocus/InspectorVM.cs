@@ -324,7 +324,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
                 if ((!forRerun) || (inspectorOptions.SaveImagesOnReruns)) {
                     if (!String.IsNullOrEmpty(result.SaveFolder)) {
-                        await SaveRegisteredImages(result.SaveFolder, SensorModel.SensorModelResult.RegisteredStars, SensorModel.TrianglesByImage);
+                        await SaveRegisteredImages(result.SaveFolder, SensorModel.SensorModelResult.RegisteredStars, SensorModel.TrianglesByImage, SensorModel.ReferenceImage);
                     }
                 }
             }
@@ -338,7 +338,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         private async Task SaveRegisteredImages(
             String saveFolder,
             SensorModel.RegisteredStar[] registeredStars,
-            Dictionary<int, List<RANSACRegistration.StarTriangle>> trianglesByImage) {
+            Dictionary<int, List<RANSACRegistration.StarTriangle>> trianglesByImage,
+            int referenceImage) {
             if (string.IsNullOrWhiteSpace(saveFolder)) {
                 Logger.Error("SavePath empty. Not saving registered images");
                 return;
@@ -405,18 +406,18 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                                         graphics.DrawLine(starCenterPen, starX, starY - yLength, starX, starY + yLength);
                                         graphics.DrawString(starIdx.ToString(), annotationFont, annotationBrush, new PointF(matchedStar.Star.Position.X, matchedStar.Star.Position.Y - yLength));
 
-                                        if (matchedStar.Star.OriginalPosition != matchedStar.Star.Position) {
-                                            // image has been aligned with reference - draw line
-                                            graphics.DrawLine(starCenterPen, starX, starY, matchedStar.Star.OriginalPosition.X, matchedStar.Star.OriginalPosition.Y);
-                                        }
-
-                                        if (matchedStar.Star.ReferenceImage == -1) {
+                                        if (matchedStar.Star.OriginalPosition.X == 0 && matchedStar.Star.OriginalPosition.Y == 0) {
                                             graphics.DrawString($"Image: {matchedStar.ImageIndex}, Not aligned", annotationFont, infoBrush, new PointF(0, 0));
                                         } else {
-                                            if (matchedStar.Star.ReferenceImage == matchedStar.ImageIndex) {
+                                            if (referenceImage == matchedStar.ImageIndex) {
                                                 graphics.DrawString($"Image: {matchedStar.ImageIndex}, Reference image", annotationFont, infoBrush, new PointF(0, 0));
                                             } else {
-                                                graphics.DrawString($"Image: {matchedStar.ImageIndex}, Ref: {matchedStar.Star.ReferenceImage}", annotationFont, infoBrush, new PointF(0, 0));
+                                                // image has been aligned with reference - draw line
+                                                Rectangle rectOriginal = new Rectangle((int)star.RegistrationX, (int)star.RegistrationY,
+                                                    matchedStar.Star.BoundingBox.Width, matchedStar.Star.BoundingBox.Height);
+                                                graphics.DrawEllipse(starCenterPen, rectOriginal);
+                                                graphics.DrawLine(starCenterPen, starX, starY, matchedStar.Star.OriginalPosition.X, matchedStar.Star.OriginalPosition.Y);
+                                                graphics.DrawString($"Image: {matchedStar.ImageIndex}, Ref: {referenceImage}", annotationFont, infoBrush, new PointF(0, 0));
                                             }
                                         }
                                         break;
@@ -452,7 +453,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                             var img = ImageUtility.ConvertBitmap(newBitmap, PixelFormats.Bgr24);
                             img.Freeze();
 
-                            var filename = $"Registered_Index{outputIndexMap[i]:00}_Focuser{detectedStars.FocuserPosition}.png";
+                            var suffix = i == referenceImage ? "_ref" : "";
+                            var filename = $"Registered_Index{outputIndexMap[i]:00}_Focuser{detectedStars.FocuserPosition}{suffix}.png";
                             var targetPath = Path.Combine(saveFolder, filename);
                             using (var fileStream = new FileStream(targetPath, FileMode.Create)) {
                                 BitmapEncoder encoder = new PngBitmapEncoder();
@@ -884,7 +886,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 return false;
             } catch (Exception e) {
                 if ((inspectorOptions.SaveImagesOnReruns) && (outputFolder != null)) {
-                    await SaveRegisteredImages(outputFolder, SensorModel.SensorModelResult.RegisteredStars, SensorModel.TrianglesByImage);
+                    await SaveRegisteredImages(outputFolder, SensorModel.SensorModelResult.RegisteredStars, SensorModel.TrianglesByImage, SensorModel.ReferenceImage);
                 }
 
                 Notification.ShowError($"Inspection auto focus rerun analysis failed: {e.Message}");

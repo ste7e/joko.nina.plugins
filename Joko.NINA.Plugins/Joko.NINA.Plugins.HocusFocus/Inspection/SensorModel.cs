@@ -343,6 +343,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             int stepSize,
             CancellationToken ct) {
             using (var stopwatch = MultiStopWatch.Measure()) {
+                int maxStarsPerRegion = inspectorOptions.MaxStarsPerRegion;
                 // registration phase
                 int minHfrIndex = 0;
                 double minHfr = allDetectedStars[0].StarDetectionResult.AverageHFR;
@@ -353,6 +354,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         minHfr = nextHfr;
                     }
                 }
+                ReferenceImage = minHfrIndex;
+
                 ct.ThrowIfCancellationRequested();
 
                 RegisteredStar[] registeredStars = null;
@@ -405,6 +408,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                             stopwatch, minHfrIndex,
                             ((inspectorOptions.UseRANSAC) && (ransacAligned == allDetectedStars.Count)) ? 3 : 30,
                             inspectorOptions.RejectBadBrightnessMatches ? maxNormalisedBrightnessDiff : -1,
+                            maxStarsPerRegion,
                             progress);
                     } else {
                         (registeredStars, rejectionsOnBrightnessDiff) = MatchStarsUsingKdTree(allDetectedStars,
@@ -665,6 +669,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             }
         }
 
+        public int ReferenceImage { get; set; }
+
         public Dictionary<int, List<RANSACRegistration.StarTriangle>> TrianglesByImage;
 
         private void ResetRegistration(List<SensorDetectedStars> allDetectedStars) {
@@ -772,9 +778,17 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     // adjust each star according to the transform
                     for (int starIndex = 0; starIndex < allDetectedStars[imageIndex].StarDetectionResult.StarList.Count; starIndex++) {
                         var oldPoint = allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].Position;
+                        
                         var transformedPoint = transform.Transform(new Point2D(allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].Position));
                         allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].Position = new Accord.Point((float)transformedPoint.X, (float)transformedPoint.Y);
-                        ((HocusFocusDetectedStar)(allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex])).ReferenceImage = minHfrIndex;
+                        
+                        transformedPoint = transform.Transform(new Point2D(allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox.Location));
+                        allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox
+                            = new System.Drawing.Rectangle(
+                                        (int)transformedPoint.X, 
+                                        (int)transformedPoint.Y,
+                                        allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox.Width,
+                                        allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox.Height);
                     }
                     imagesAligned++;
                 } catch (Exception ex) {
@@ -917,6 +931,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             int minHfrIndex,
             int searchSquareSide,
             double maxRelativeBrightnessDiff,
+            int maxBrightestPerRegion,
             IProgress<ApplicationStatus> progress) {
             Trace.WriteLine("MatchStarsWithoutKdTree");
 
@@ -936,16 +951,16 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
             int allStarCount = starDict.Count;
             int minMatchPct = 10;   // proportion of images that must have star for star to be included
-            double minBrightness = starDict.Keys.OrderBy(s => s.NormalisedBrightness).ElementAt((int)(allStarCount * .05)).NormalisedBrightness; // min set allow 95% of stars
-            Trace.WriteLine($"Minimum brightness set to {minBrightness}");
+            //double minBrightness = starDict.Keys.OrderBy(s => s.NormalisedBrightness).ElementAt((int)(allStarCount * .05)).NormalisedBrightness; // min set allow 95% of stars
+            //Trace.WriteLine($"Minimum brightness set to {minBrightness}");
 
             // remove the dimmest stars so we only keep the brightest ones
-            int brightestStarCount = allStarCount;
-            if (minBrightness != 0) {
-                foreach (var pt in starDict.Keys.Where(pt => pt.NormalisedBrightness < minBrightness))
-                    starDict.Remove(pt);
-                brightestStarCount = starDict.Count;
-            }
+            //int brightestStarCount = allStarCount;
+            //if (minBrightness != 0) {
+            //    foreach (var pt in starDict.Keys.Where(pt => pt.NormalisedBrightness < minBrightness))
+            //        starDict.Remove(pt);
+            //    brightestStarCount = starDict.Count;
+            //}
             int rejectionsOnBrightness = 0;
 
             stopwatch.RecordEntry("Dictionary");
@@ -968,33 +983,34 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             stopwatch.RecordEntry("Match");
 
             int starCount = starDict.Count;
-            int minStarsPerRegion = Math.Max(starCount / regions.Count / 4, 15);  // minimum of 25% of detected stars must be matched or 15 whichever is higher
-            Trace.WriteLine($"MinStarsPerRegion set to {minStarsPerRegion} ({starCount} total stars)");
-            //Dictionary<Rect2d, int> starsPerRegion = new Dictionary<Rect2d, int>(regions.Count);
-            //regions.ForEach(r => {
-            //    Rect2d rect = r.OuterBoundary.ToRect2D(imageSize);
-            //    if (!starsPerRegion.ContainsKey(rect))
-            //        starsPerRegion.Add(rect, 0);
-            //});
-
-            //foreach (var pt in starDict.Keys) {
-            //    starsPerRegion.Keys
-            //                    .Where(r => r.Contains(pt.X, pt.Y))
-            //                    .ToList()
-            //                    .ForEach(r => starsPerRegion[r]++);
-            //}
             status.Status = "Examining region";
             status.MaxProgress = regions.Count;
             status.ProgressType = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
             status.Progress = 0;
+            int regionNumber = 0;
             foreach (var region in regions) {
+                regionNumber++;
                 status.Progress++;
                 progress.Report(status);
+
+                var starsInRegion = starDict.Keys
+                    .Where(pt => (region.OuterBoundary.ToRect2D(imageSize).Contains(pt.X, pt.Y)));
 
                 RegisteredStar[] registeredStarsInRegion = new RegisteredStar[0];
                 for (int matchPct = 100; matchPct > minMatchPct; matchPct -= 10) {
                     int matchCount = 0;
-                    registeredStarsInRegion = starDict.Keys
+
+                    // restrict stars to brightest [maxBrightestPerRegion] within this region
+                    var starsByBrightness = starsInRegion.OrderByDescending(s => s.NormalisedBrightness).ToList();
+                    if ((maxBrightestPerRegion>-1) && (starsByBrightness.Count() > maxBrightestPerRegion)) {
+                        starsByBrightness = starsByBrightness.Take(maxBrightestPerRegion).ToList();
+                        Trace.WriteLine($"{starsInRegion.Count()} stars in region {regionNumber} reduced to brightest {starsByBrightness.Count}");
+                    }
+
+                    int minStarsPerRegion = Math.Max(starsByBrightness.Count / 4, 15);  // minimum of 25% of detected stars must be matched or 15 whichever is higher
+                    Trace.WriteLine($"Region {regionNumber}: MinStarsPerRegion set to {minStarsPerRegion} ({starsByBrightness.Count} total stars in this region)");
+
+                    registeredStarsInRegion = starsByBrightness
                         .Where(pt => (region.OuterBoundary.ToRect2D(imageSize).Contains(pt.X, pt.Y)) &&    // just this region
                                     (starDict[pt].Count >= allDetectedStars.Count * matchPct / 100))   // only use stars that are matched by matchPct% of the images
                         .Select(pt => {
@@ -1010,6 +1026,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                                     Star = new() {
                                         BoundingBox = firstStarIngroup.BoundingBox,
                                         Position = firstStarIngroup.Position,
+                                        OriginalPosition = firstStarIngroup.OriginalPosition,
                                         PSF = firstStarIngroup.PSF,
                                         Background = focuserPositionGroup.Average(g => g.Star.Background),
                                         AverageBrightness = focuserPositionGroup.Average(g => g.Star.AverageBrightness),
@@ -1035,9 +1052,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
             stopwatch.RecordEntry("NonTree-based registration");
 
-            if (minBrightness > 0) {
-                Trace.WriteLine($"Of all {allStarCount} stars found, {brightestStarCount} stars were selected on brightness (> {minBrightness})");
-            }
+            //if (minBrightness > 0) {
+            //    Trace.WriteLine($"Of all {allStarCount} stars found, {brightestStarCount} stars were selected on brightness (> {minBrightness})");
+            //}
             Trace.WriteLine($"{starCount} stars were registered and matched to stars in other images.  Stars on enough images are {registeredStars.Length}");
             return (registeredStars, rejectionsOnBrightness);
         }

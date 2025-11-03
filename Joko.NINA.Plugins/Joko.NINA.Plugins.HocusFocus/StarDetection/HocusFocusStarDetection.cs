@@ -197,8 +197,6 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
         public PSFModel PSF { get; set; }
         public float NormalisedBrightness { get; set; }
         public Accord.Point OriginalPosition { get; set; }
-        private int refImage = -1;
-        public int ReferenceImage { get => refImage; set { refImage = value; } } // this is overkill - all stars will have same value, just in for debugging
 
         public override string ToString() {
             return $"{{{nameof(PSF)}={PSF}, {nameof(HFR)}={HFR.ToString()}, {nameof(Position)}={Position.ToString()}, {nameof(AverageBrightness)}={AverageBrightness.ToString()}, {nameof(MaxBrightness)}={MaxBrightness.ToString()}, {nameof(Background)}={Background.ToString()}, {nameof(BoundingBox)}={BoundingBox.ToString()}}}";

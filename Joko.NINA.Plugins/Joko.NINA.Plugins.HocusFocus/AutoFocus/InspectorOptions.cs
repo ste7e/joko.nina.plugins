@@ -461,5 +461,19 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 }
             }
         }
+
+        public string MaxStarsPerRegionHint { get { return $"(unlimited)"; } }
+        private int maxStarsPerRegion = -1;
+
+        public int MaxStarsPerRegion {
+            get => maxStarsPerRegion;
+            set {
+                if (maxStarsPerRegion != value) {
+                    maxStarsPerRegion = value;
+                    optionsAccessor.SetValueInt32(nameof(MaxStarsPerRegion), maxStarsPerRegion);
+                    RaisePropertyChanged();
+                }
+            }
+        }
     }
 }
