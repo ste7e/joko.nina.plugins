@@ -778,14 +778,14 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     // adjust each star according to the transform
                     for (int starIndex = 0; starIndex < allDetectedStars[imageIndex].StarDetectionResult.StarList.Count; starIndex++) {
                         var oldPoint = allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].Position;
-                        
+
                         var transformedPoint = transform.Transform(new Point2D(allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].Position));
                         allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].Position = new Accord.Point((float)transformedPoint.X, (float)transformedPoint.Y);
-                        
+
                         transformedPoint = transform.Transform(new Point2D(allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox.Location));
                         allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox
                             = new System.Drawing.Rectangle(
-                                        (int)transformedPoint.X, 
+                                        (int)transformedPoint.X,
                                         (int)transformedPoint.Y,
                                         allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox.Width,
                                         allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox.Height);
@@ -860,7 +860,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         ) {
                         var globalNeighborIndex = globalNeighbor.Value.Index;
                         var neighboringStar = globalNeighbor.Value.DetectedStar;
-                        var distance = MathUtility.DotProduct(globalNeighbor.Point, sourcePoint);
+                        var distance = MathUtility.SumOfSquaresOfDifferences(globalNeighbor.Point, sourcePoint);
                         queue.Enqueue(new MatchingPair() { SourceIndex = sourceIndex, GlobalIndex = globalNeighborIndex }, -distance);
                         queuedCount++;
                     }
@@ -1002,7 +1002,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
                     // restrict stars to brightest [maxBrightestPerRegion] within this region
                     var starsByBrightness = starsInRegion.OrderByDescending(s => s.NormalisedBrightness).ToList();
-                    if ((maxBrightestPerRegion>-1) && (starsByBrightness.Count() > maxBrightestPerRegion)) {
+                    if ((maxBrightestPerRegion > -1) && (starsByBrightness.Count() > maxBrightestPerRegion)) {
                         starsByBrightness = starsByBrightness.Take(maxBrightestPerRegion).ToList();
                         Trace.WriteLine($"{starsInRegion.Count()} stars in region {regionNumber} reduced to brightest {starsByBrightness.Count}");
                     }
