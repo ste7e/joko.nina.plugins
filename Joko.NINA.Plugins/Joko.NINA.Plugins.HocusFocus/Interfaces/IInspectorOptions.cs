@@ -71,6 +71,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         double PreviousRunBrightnessDiff { get; set; }
         double StartingBrightnessDiff { get; set; }
         bool SaveImagesOnReruns { get; set; }
+        bool SaveAlignmentImages { get; set; }
         bool UseRANSACTriangles { get; set; }
         int MaxStarsPerRegion { get; set; }
     }

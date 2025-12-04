@@ -1649,6 +1649,19 @@
                                     Orientation="Horizontal">
                                     <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.SaveImagesOnReruns}" />
                                 </StackPanel>
+                                <TextBlock
+                                    Grid.Row="4"
+                                    Grid.Column="2"
+                                    Margin="5"
+                                    VerticalAlignment="Center"
+                                    Text="Also save alignment images" />
+                                <StackPanel
+                                    IsEnabled="{Binding InspectorOptions.SaveImagesOnReruns}"
+                                    Grid.Row="4"
+                                    Grid.Column="3"
+                                    Orientation="Horizontal">
+                                    <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.SaveAlignmentImages}" />
+                                </StackPanel>
                             </Grid>
                         </Expander>
                         <!--

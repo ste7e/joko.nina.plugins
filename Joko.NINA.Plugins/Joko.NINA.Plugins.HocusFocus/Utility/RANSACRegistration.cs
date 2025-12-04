@@ -48,6 +48,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             return new PointF((float)X, (float)Y);
         }
 
+        public System.Drawing.Point AsPoint() {
+            return new System.Drawing.Point((int)X, (int)Y);
+        }
+
         public override string ToString() {
             return $"{X}, {Y} ({NormalisedBrightness})";
         }
@@ -149,8 +153,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                     this.referenceID = referenceID;
                 }
 
-                //normalizedLengths = normalizeLength();
-                //normalizedBrightnesses = normalizeBrightnesses(minBrightness, maxBrightness);
+                normalizedLengths = normalizeLength();
+                normalizedBrightnesses = normalizeBrightnesses(minBrightness, maxBrightness);
                 normalizedPoints = normalizePositions(imageSize, minBrightness, maxBrightness);
             }
 
@@ -218,11 +222,19 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 };
             }
 
+            public double[] AsShapeVector() {
+                return new double[] {
+                    normalizedLengths[0], 
+                    normalizedLengths[1], 
+                    normalizedLengths[2], 
+                };
+            }
+
             public double[] AsBrightnessVector() {
                 return new double[] {
-                    normalizedPoints[0].NormalisedBrightness,
-                    normalizedPoints[1].NormalisedBrightness,
-                    normalizedPoints[2].NormalisedBrightness,
+                    NormalizedBrightnesses[0],
+                    NormalizedBrightnesses[1],
+                    NormalizedBrightnesses[2],
                 };
             }
 
@@ -245,6 +257,27 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
         }
 
+        public static double AngleBetweenPoints(Point2D a, Point2D b, Point2D c) {
+            double BAx = a.X - b.X;
+            double BAy = a.Y - b.Y;
+            double BCx = c.X - b.X;
+            double BCy = c.Y - b.Y;
+
+            double dot = BAx * BCx + BAy * BCy;
+            double magBA = Math.Sqrt(BAx * BAx + BAy * BAy);
+            double magBC = Math.Sqrt(BCx * BCx + BCy * BCy);
+
+            if (magBA == 0 || magBC == 0)
+                throw new ArgumentException("Points must not be identical.");
+
+            // Calculate angle (in radians)
+            double cosAngle = dot / (magBA * magBC);
+            cosAngle = Math.Clamp(cosAngle, -1.0, 1.0);
+
+            double angleRad = Math.Acos(cosAngle);
+            return angleRad;
+        }
+
         public static List<StarTriangle> BuildStarTriangles(System.Drawing.Size imageSize, List<Point2D> point2Ds, int searchSquareSide, bool onePerPoint, bool isReference) {
             // first pass - build list of triangles in reference image
             var triangles = new List<StarTriangle>();
@@ -261,14 +294,23 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 var searchArea = new Rect2d(pt.X - searchSquareSide, pt.Y - searchSquareSide, searchSquareSide * 2, searchSquareSide * 2);
                 var nearbyPoints = point2Ds
                     .Where(p => !pointsUsed.Contains(p) && searchArea.Contains(p.X, p.Y) && (p != pt))
-                    .OrderBy(p => calcDistance(p, pt))
+                    .OrderByDescending(p => calcDistance(p, pt))
                     .ToList();
                 if (onePerPoint) {
                     if (nearbyPoints.Count > 2) {
-                        triangles.Add(new StarTriangle(imageSize, minBrightness, maxBrightness, pt, nearbyPoints[0], nearbyPoints[1], isReference, id++));
+                        double widestAngle = 0;
+                        int pt3 = 1;
+                        for (int j = 1; j < nearbyPoints.Count; j++) {
+                            double rad = AngleBetweenPoints(pt, nearbyPoints[0], nearbyPoints[j]);
+                            if (rad > widestAngle) {
+                                pt3 = j;
+                                widestAngle = rad;
+                            }
+                        }
+                        triangles.Add(new StarTriangle(imageSize, minBrightness, maxBrightness, pt, nearbyPoints[0], nearbyPoints[pt3], isReference, id++));
                         pointsUsed.Add(pt);
                         pointsUsed.Add(nearbyPoints[0]);
-                        pointsUsed.Add(nearbyPoints[1]);
+                        pointsUsed.Add(nearbyPoints[pt3]);
                     }
                 } else {
                     for (int j = 0; j < nearbyPoints.Count; j++) {
@@ -295,7 +337,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         public static (List<Point2D> srcPoints, List<Point2D> dstPoints) GeneratePutativeMatchesUsingSimilarTriangles(
             List<StarTriangle> imageTriangles,
             List<StarTriangle> referenceTriangles,
-            ApplicationStatus status) {
+            ApplicationStatus status,
+            double minCosSim) {
             var srcPoints = new List<Point2D>();
             var dstPoints = new List<Point2D>();
 
@@ -307,12 +350,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
 
             // For each triangle in the reference image, find closest match in this image
-            double minCosSim = 0.9999; // Cosine similarity threshold for accepting a match
 
             foreach (var referenceTriangle in referenceTriangles) {
-                //if (referenceTriangle.ReferenceID == 36) {
-                //    int a = 1;
-                //}
                 if (status != null) {
                     status.Progress3++;
                 }
@@ -320,7 +359,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 StarTriangle bestMatch = null;
                 List<(StarTriangle, double)> matches = new();
                 foreach (var imageTriangle in imageTriangles.Where(t => !t.Matched)) {
-                    var cosSim = CosineSimilarity(referenceTriangle.AsPositionVector(), imageTriangle.AsPositionVector());
+                    var cosSim = CosineSimilarity(referenceTriangle.AsShapeVector(), imageTriangle.AsShapeVector());
 
                     if (cosSim > bestCosSimLoc) {
                         matches.Add((imageTriangle, cosSim));
@@ -439,7 +478,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 throw new InvalidOperationException("Not enough inliers to compute transformation.");
             }
 
-            Trace.WriteLine($"Best: {bestTransform} {bestInlierIndices.Count * 100 / srcPoints.Count:0.####}% aveDist:{bestInlierAveDistance:0.###} iterations:{randIndices.Count}");
+            //Trace.WriteLine($"Best: {bestTransform} {bestInlierIndices.Count * 100 / srcPoints.Count:0.####}% aveDist:{bestInlierAveDistance:0.###} iterations:{randIndices.Count}");
 
             return bestTransform;
         }

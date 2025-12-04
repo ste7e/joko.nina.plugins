@@ -63,6 +63,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             useRANSAC = optionsAccessor.GetValueBoolean(nameof(UseRANSAC), true);
             useAlternativeMatchinguseTrees = optionsAccessor.GetValueBoolean(nameof(UseAlternativeMatching), false);
             saveImagesOnReruns = optionsAccessor.GetValueBoolean(nameof(SaveImagesOnReruns), false);
+            saveAlignmentImages = optionsAccessor.GetValueBoolean(nameof(SaveAlignmentImages), false);
             useRANSACTriangles = optionsAccessor.GetValueBoolean(nameof(UseRANSACTriangles), false);
         }
 
@@ -444,6 +445,19 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 if (saveImagesOnReruns != value) {
                     saveImagesOnReruns = value;
                     optionsAccessor.SetValueBoolean(nameof(SaveImagesOnReruns), saveImagesOnReruns);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        private bool saveAlignmentImages = false;
+
+        public bool SaveAlignmentImages {
+            get => saveAlignmentImages;
+            set {
+                if (saveAlignmentImages != value) {
+                    saveAlignmentImages = value;
+                    optionsAccessor.SetValueBoolean(nameof(SaveAlignmentImages), saveAlignmentImages);
                     RaisePropertyChanged();
                 }
             }
