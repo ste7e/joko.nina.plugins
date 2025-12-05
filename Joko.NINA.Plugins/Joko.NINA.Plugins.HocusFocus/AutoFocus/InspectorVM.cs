@@ -408,7 +408,22 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             })));
         }
 
-        private static void SaveRegisteredImage(string saveFolder, RegisteredStar[] registeredStars, Dictionary<int, List<RANSACRegistration.StarTriangle>> trianglesByImage, int referenceImage, int imageIndex, Dictionary<int, int> outputIndexMap, SensorDetectedStars detectedStars, SolidBrush[] brushes, System.Drawing.Pen[] pens, Font annotationFont, SolidBrush infoBrush, System.Drawing.Pen triPenMatched, SolidBrush triPenReferenceBrush, System.Drawing.Pen triPenReference, Bitmap bmp) {
+        private static void SaveRegisteredImage(
+            string saveFolder,
+            RegisteredStar[] registeredStars,
+            Dictionary<int, List<RANSACRegistration.StarTriangle>> trianglesByImage,
+            int referenceImage,
+            int imageIndex,
+            Dictionary<int, int> outputIndexMap,
+            SensorDetectedStars detectedStars,
+            SolidBrush[] brushes,
+            System.Drawing.Pen[] pens,
+            Font annotationFont,
+            SolidBrush infoBrush,
+            System.Drawing.Pen triPenMatched,
+            SolidBrush triPenReferenceBrush,
+            System.Drawing.Pen triPenReference,
+            Bitmap bmp) {
             using (var newBitmap = new Bitmap(bmp.Width, bmp.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb)) {
                 Graphics graphics = Graphics.FromImage(newBitmap);
                 graphics.DrawImage(bmp, 0, 0);
@@ -460,14 +475,13 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     }
                     if (done) break;
                 }
-                if (!aligned) {
+                if (!detectedStars.HasBeenAligned) {
                     graphics.DrawString($"Image: {imageIndex}, Not aligned", annotationFont, infoBrush, new PointF(0, 0));
                 } else {
                     if (referenceImage == imageIndex) {
                         graphics.DrawString($"Image: {imageIndex}, Reference image", annotationFont, infoBrush, new PointF(0, 0));
                     } else {
                         graphics.DrawString($"Image: {imageIndex}, Ref: {referenceImage}", annotationFont, infoBrush, new PointF(0, 0));
-
                     }
                 }
 

@@ -12,6 +12,7 @@
 
 using MathNet.Numerics.LinearAlgebra;
 using NINA.Core.Model;
+using NINA.Core.Utility;
 using OpenCvSharp;
 using System;
 using System.Collections.Generic;
@@ -224,14 +225,25 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
             public double[] AsShapeVector() {
                 return new double[] {
-                    normalizedLengths[0], 
-                    normalizedLengths[1], 
-                    normalizedLengths[2], 
+                    normalizedLengths[0],
+                    normalizedLengths[1],
+                    normalizedLengths[2],
                 };
             }
 
             public double[] AsBrightnessVector() {
                 return new double[] {
+                    NormalizedBrightnesses[0],
+                    NormalizedBrightnesses[1],
+                    NormalizedBrightnesses[2],
+                };
+            }
+
+            public double[] AsShapeAndBrightnessVector() {
+                return new double[] {
+                    normalizedLengths[0],
+                    normalizedLengths[1],
+                    normalizedLengths[2],
                     NormalizedBrightnesses[0],
                     NormalizedBrightnesses[1],
                     NormalizedBrightnesses[2],
@@ -351,7 +363,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
             // For each triangle in the reference image, find closest match in this image
 
-            foreach (var referenceTriangle in referenceTriangles) {
+            for (int i = 0; i < referenceTriangles.Count; i++) {
+                var referenceTriangle = referenceTriangles[i];
                 if (status != null) {
                     status.Progress3++;
                 }
@@ -379,6 +392,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                             bestCosSimBri = cosSim;
                         }
                     }
+                    //Logger.Debug($"Multiple ({matches.Count}) matches for ref triangle {i} - selected triangle with briCosSim of {bestCosSimBri}");
                 }
 
                 if ((bestMatch != null) && (bestCosSimLoc > minCosSim)) {
@@ -442,9 +456,14 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 var sampleSrc = new List<Point2D>() { srcPoints[idx1], srcPoints[idx2] };
                 var sampleDst = new List<Point2D>() { dstPoints[idx1], dstPoints[idx2] };
 
+                SimilarityTransform transform;
                 // Estimate transformation from sample
-                var transform = FitSimilarityTransform(sampleSrc, sampleDst);
-                if (transform == null) continue;
+                try {
+                    transform = FitSimilarityTransform(sampleSrc, sampleDst);
+                } catch (Exception e) {
+                    Logger.Error($"Failed to build affine transform: {e.Message}");
+                    continue;
+                }
 
                 // Count inliers
                 List<int> inlierIndices = new List<int>();
@@ -474,6 +493,91 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 var inlierSrc = bestInlierIndices.Select(idx => srcPoints[idx]).ToList();
                 var inlierDst = bestInlierIndices.Select(idx => dstPoints[idx]).ToList();
                 bestTransform = FitSimilarityTransform(inlierSrc, inlierDst);
+            } else {
+                throw new InvalidOperationException("Not enough inliers to compute transformation.");
+            }
+
+            //Trace.WriteLine($"Best: {bestTransform} {bestInlierIndices.Count * 100 / srcPoints.Count:0.####}% aveDist:{bestInlierAveDistance:0.###} iterations:{randIndices.Count}");
+
+            return bestTransform;
+        }
+
+        public static Matrix3x2 EstimateAffineTransform(
+            List<Point2D> srcPoints,
+            List<Point2D> dstPoints,
+            ApplicationStatus status,
+            IProgress<ApplicationStatus> progress,
+            int maxIterations = 10000,
+            double inlierThreshold = 9,    // 3.0^2
+            int minInliers = 4) {
+            if (srcPoints.Count != dstPoints.Count || srcPoints.Count < 2) {
+                throw new ArgumentException("At least 2 corresponding points are required.");
+            }
+
+            List<int> bestInlierIndices = new List<int>();
+            double bestInlierAveDistance = double.MaxValue;
+            Matrix3x2 bestTransform = null;
+
+            status.Status3 = "Transform iteration";
+            status.ProgressType3 = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
+            status.MaxProgress3 = maxIterations;
+
+            // build randomized list of pairs of points
+            List<(int, int, int)> randIndices = new List<(int, int, int)>();
+            for (int i = 0; i < srcPoints.Count; i++) {
+                for (int j = i + 1; j < srcPoints.Count; j++) {
+                    for (int k = j + 1; k < srcPoints.Count; k++) {
+                        randIndices.Add((i, j, k));
+                    }
+                }
+            }
+            randIndices = randIndices.OrderBy(x => RNG.Next()).Take(maxIterations).ToList();
+
+            foreach ((int idx1, int idx2, int idx3) in randIndices) {
+                status.Progress3++;
+                progress.Report(status);
+
+                var sampleSrc = new List<Point2D>() { srcPoints[idx1], srcPoints[idx2], srcPoints[idx3] };
+                var sampleDst = new List<Point2D>() { dstPoints[idx1], dstPoints[idx2], dstPoints[idx3] };
+
+                Matrix3x2 transform;
+                // Estimate transformation from sample
+                try {
+                    transform = FitAffineTransform(sampleSrc, sampleDst);
+                } catch (Exception e) {
+                    if (e.Message != "Singular matrix.")
+                        Logger.Error($"Failed to build affine transform: {e.Message}");
+                    continue;
+                }
+
+                // Count inliers
+                List<int> inlierIndices = new List<int>();
+                double inlierDistanceTotal = 0;
+                for (int j = 0; j < srcPoints.Count; j++) {
+                    var transformedPoint = transform.Transform(srcPoints[j]);
+                    double distance = calcDistance(transformedPoint, dstPoints[j]);
+                    if (distance < inlierThreshold) {
+                        inlierIndices.Add(j);
+                        inlierDistanceTotal += distance;
+                    }
+                }
+
+                double aveInlierDistance = inlierDistanceTotal / inlierIndices.Count;
+
+                //Trace.WriteLine($"{idx1},{idx2}: {sampleSrc[0]}, {sampleSrc[1]} -> {sampleDst[0]}, {sampleDst[1]} = {transform}, {inlierIndices.Count*100/srcPoints.Count:0.####}%");
+
+                // Update best model if more inliers
+                if ((inlierIndices.Count > bestInlierIndices.Count) || ((inlierIndices.Count == bestInlierIndices.Count) && (aveInlierDistance < bestInlierAveDistance))) {
+                    bestInlierIndices = inlierIndices;
+                    bestInlierAveDistance = aveInlierDistance;
+                }
+            }
+
+            // Refine transformation using all inliers
+            if (bestInlierIndices.Count >= minInliers) {
+                var inlierSrc = bestInlierIndices.Select(idx => srcPoints[idx]).ToList();
+                var inlierDst = bestInlierIndices.Select(idx => dstPoints[idx]).ToList();
+                bestTransform = FitAffineTransform(inlierSrc, inlierDst);
             } else {
                 throw new InvalidOperationException("Not enough inliers to compute transformation.");
             }
@@ -520,6 +624,209 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             double ty = x[3];
 
             return new SimilarityTransform(scale, rotation, tx, ty);
+        }
+
+        /// <summary>
+        /// Computes an affine transform that maps sourcePoints -> destPoints.
+        /// Requires at least 3 non-collinear points.
+        /// Returns Matrix3x2 containing the affine transform.
+        /// </summary>
+        public static Matrix3x2 FitAffineTransform(
+            IList<Point2D> sourcePoints,
+            IList<Point2D> destPoints) {
+            if (sourcePoints.Count != destPoints.Count)
+                throw new ArgumentException("Point lists must have the same length.");
+
+            int n = sourcePoints.Count;
+            if (n < 3)
+                throw new ArgumentException("At least 3 point pairs are required.");
+
+            // We solve for:
+            // x' = a*x + b*y + c
+            // y' = d*x + e*y + f
+            // Unknowns: [a b c d e f]^T  (6 values)
+
+            // Build normal equations: A^T * A * params = A^T * b
+
+            double[,] ATA = new double[6, 6];
+            double[] ATb = new double[6];
+
+            for (int i = 0; i < n; i++) {
+                double x = sourcePoints[i].X;
+                double y = sourcePoints[i].Y;
+                double xp = destPoints[i].X;
+                double yp = destPoints[i].Y;
+
+                double[] rowX = { x, y, 1, 0, 0, 0 }; // coefficients for x'
+                double[] rowY = { 0, 0, 0, x, y, 1 }; // coefficients for y'
+
+                // Accumulate for xp (x')
+                AccumulateATA(ATA, rowX);
+                AccumulateATb(ATb, rowX, xp);
+
+                // Accumulate for yp (y')
+                AccumulateATA(ATA, rowY);
+                AccumulateATb(ATb, rowY, yp);
+            }
+
+            // Solve the 6x6 system
+            double[] solution = SolveLinearSystem6x6(ATA, ATb);
+
+            return new Matrix3x2(
+                (double)solution[0], (double)solution[1],
+                (double)solution[3], (double)solution[4],
+                (double)solution[2], (double)solution[5]);
+        }
+
+        private static void AccumulateATA(double[,] ATA, double[] row) {
+            for (int i = 0; i < 6; i++)
+                for (int j = 0; j < 6; j++)
+                    ATA[i, j] += row[i] * row[j];
+        }
+
+        private static void AccumulateATb(double[] ATb, double[] row, double value) {
+            for (int i = 0; i < 6; i++)
+                ATb[i] += row[i] * value;
+        }
+
+        /// <summary> Naive Gaussian elimination for a 6×6 system. </summary>
+        private static double[] SolveLinearSystem6x6(double[,] A, double[] b) {
+            int n = 6;
+            double[,] M = new double[n, n + 1];
+
+            // Build augmented matrix
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < n; j++)
+                    M[i, j] = A[i, j];
+                M[i, n] = b[i];
+            }
+
+            // Gaussian elimination
+            for (int i = 0; i < n; i++) {
+                // Pivot
+                double max = Math.Abs(M[i, i]);
+                int pivot = i;
+                for (int r = i + 1; r < n; r++) {
+                    if (Math.Abs(M[r, i]) > max) {
+                        max = Math.Abs(M[r, i]);
+                        pivot = r;
+                    }
+                }
+                if (pivot != i)
+                    SwapRows(M, i, pivot);
+
+                // Normalize pivot row
+                double div = M[i, i];
+                if (Math.Abs(div) < 1e-12)
+                    throw new Exception("Singular matrix.");
+
+                for (int j = i; j <= n; j++)
+                    M[i, j] /= div;
+
+                // Eliminate below
+                for (int r = i + 1; r < n; r++) {
+                    double factor = M[r, i];
+                    for (int j = i; j <= n; j++)
+                        M[r, j] -= factor * M[i, j];
+                }
+            }
+
+            // Back-substitution
+            double[] x = new double[n];
+            for (int i = n - 1; i >= 0; i--) {
+                x[i] = M[i, n];
+                for (int j = i + 1; j < n; j++)
+                    x[i] -= M[i, j] * x[j];
+            }
+
+            return x;
+        }
+
+        private static void SwapRows(double[,] M, int r1, int r2) {
+            int cols = M.GetLength(1);
+            for (int i = 0; i < cols; i++) {
+                double tmp = M[r1, i];
+                M[r1, i] = M[r2, i];
+                M[r2, i] = tmp;
+            }
+        }
+    }
+
+    public class Matrix3x2 {
+        public double M11, M12;
+        public double M21, M22;
+        public double M31, M32;
+
+        public Matrix3x2(
+            double m11, double m12,
+            double m21, double m22,
+            double m31, double m32) {
+            M11 = m11; M12 = m12;
+            M21 = m21; M22 = m22;
+            M31 = m31; M32 = m32;
+        }
+
+        // Identity Matrix
+        public static Matrix3x2 Identity =>
+            new Matrix3x2(1, 0, 0, 1, 0, 0);
+
+        // Apply transform to a point
+        public (double X, double Y) TransformPoint(double x, double y) {
+            double tx = M11 * x + M12 * y + M31;
+            double ty = M21 * x + M22 * y + M32;
+            return (tx, ty);
+        }
+
+        public Point2D Transform(Point2D v) {
+            return new Point2D(
+                M11 * v.X + M12 * v.Y + M31,
+                M21 * v.X + M22 * v.Y + M32
+            );
+        }
+
+        // Matrix multiplication: result = a * b
+        public static Matrix3x2 operator *(Matrix3x2 a, Matrix3x2 b) {
+            return new Matrix3x2(
+                a.M11 * b.M11 + a.M12 * b.M21,
+                a.M11 * b.M12 + a.M12 * b.M22,
+
+                a.M21 * b.M11 + a.M22 * b.M21,
+                a.M21 * b.M12 + a.M22 * b.M22,
+
+                a.M31 * b.M11 + a.M32 * b.M21 + b.M31,
+                a.M31 * b.M12 + a.M32 * b.M22 + b.M32
+            );
+        }
+
+        // Determinant of the linear part
+        public double GetDeterminant() {
+            return M11 * M22 - M12 * M21;
+        }
+
+        // Inverse transform
+        public bool Invert(out Matrix3x2 inv) {
+            double det = GetDeterminant();
+            if (Math.Abs(det) < 1e-12f) {
+                inv = default;
+                return false;
+            }
+
+            double invDet = 1.0f / det;
+
+            double i11 = M22 * invDet;
+            double i12 = -M12 * invDet;
+            double i21 = -M21 * invDet;
+            double i22 = M11 * invDet;
+
+            double i31 = -(i11 * M31 + i12 * M32);
+            double i32 = -(i21 * M31 + i22 * M32);
+
+            inv = new Matrix3x2(i11, i12, i21, i22, i31, i32);
+            return true;
+        }
+
+        public override string ToString() {
+            return $"[{M11}, {M12}, {M31}]  [{M21}, {M22}, {M32}]";
         }
     }
 }

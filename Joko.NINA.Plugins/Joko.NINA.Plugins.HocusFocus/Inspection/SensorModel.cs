@@ -47,6 +47,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
         public double FocuserPosition { get; private set; }
         public HocusFocusStarDetectionResult StarDetectionResult { get; private set; }
         public IRenderedImage Image { get; private set; }
+        public bool HasBeenAligned { get; set; }
 
         public override string ToString() {
             return $"{{{nameof(FocuserPosition)}={FocuserPosition.ToString()}, {nameof(StarDetectionResult)}={StarDetectionResult}}}";
@@ -333,7 +334,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
         private enum IterationDirection { None, Up, Down };
 
-        private const int searchRadiusRANSAC = 3;
+        private const int searchRadiusRANSAC = 10;
         private const int searchRadiusNonRANSAC = 30;
 
         private (SensorParaboloidModel, RegistrationAndFitResult) RegisterStarsAndFit(
@@ -696,7 +697,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
         private const double minCosSimStrict = 0.999999; // Cosine similarity threshold for accepting a match
         private const double minCosSimRelaxed = 0.99999; // Cosine similarity threshold for accepting a match
 
-
         private int AlignStarsWithRANSAC(
             List<SensorDetectedStars> allDetectedStars,
             System.Drawing.Size imageSize,
@@ -754,6 +754,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
 
             for (int imageIndex = 0; imageIndex < allDetectedStars.Count; ++imageIndex) {
                 if (imageIndex == referenceImage) {
+                    allDetectedStars[imageIndex].HasBeenAligned = true;
                     continue;
                 }
                 ApplicationStatus status = new ApplicationStatus() {
@@ -800,7 +801,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 try {
                     Logger.Info($"Image {imageIndex}, putative star matches: {putativeDst.Count} out of {theseStars.Count()} stars");
                     // calculate the transform needed to register this image
-                    var transform = RANSACRegistration.EstimateSimilarityTransform(putativeSrc, putativeDst, status, progress);
+                    var transform = RANSACRegistration.EstimateAffineTransform(putativeSrc, putativeDst, status, progress);
 
                     // adjust each star according to the transform
                     for (int starIndex = 0; starIndex < allDetectedStars[imageIndex].StarDetectionResult.StarList.Count; starIndex++) {
@@ -818,8 +819,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                                         allDetectedStars[imageIndex].StarDetectionResult.StarList[starIndex].BoundingBox.Height);
                     }
                     imagesAligned++;
+                    allDetectedStars[imageIndex].HasBeenAligned = true;
                 } catch (Exception ex) {
                     Logger.Info($"Image {imageIndex}: Error: {ex.Message}");
+                    allDetectedStars[imageIndex].HasBeenAligned = false;
                 }
             }
 
