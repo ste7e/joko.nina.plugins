@@ -1588,7 +1588,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 HFRImprovementThreshold = autoFocusOptions.HFRImprovementThreshold,
                 AutoFocusTimeout = TimeSpan.FromSeconds(autoFocusOptions.AutoFocusTimeoutSeconds),
                 AutoFocusInitialOffsetSteps = profileService.ActiveProfile.FocuserSettings.AutoFocusInitialOffsetSteps,
-                AutoFocusStepSize = (savedAttempt?.StepSize > 0) ? savedAttempt.StepSize.Value : profileService.ActiveProfile.FocuserSettings.AutoFocusStepSize,
+                AutoFocusStepSize = ((savedAttempt?.StepSize != null) && (savedAttempt?.StepSize > 0)) ? savedAttempt.StepSize.Value : profileService.ActiveProfile.FocuserSettings.AutoFocusStepSize,
                 FocuserOffset = autoFocusOptions.FocuserOffset,
                 MaxOutlierRejections = autoFocusOptions.MaxOutlierRejections,
                 OutlierRejectionConfidence = autoFocusOptions.OutlierRejectionConfidence,
@@ -1673,7 +1673,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             int stepSize = 0;
             if (savedImages.Count >= 2) {
                 var focuserPositions = savedImages.Select(i => i.FocuserPosition).Distinct().Order().Take(2).ToList();
-                stepSize = (focuserPositions.Count>1) ? Math.Abs(focuserPositions[0] - focuserPositions[1]) : 0;
+                stepSize = (focuserPositions.Count > 1) ? Math.Abs(focuserPositions[0] - focuserPositions[1]) : 0;
             }
             return new SavedAutoFocusAttempt() {
                 Attempt = attemptNumber,

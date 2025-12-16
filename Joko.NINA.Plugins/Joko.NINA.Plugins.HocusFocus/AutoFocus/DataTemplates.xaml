@@ -1499,6 +1499,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
@@ -1519,74 +1520,14 @@
                                     Orientation="Horizontal">
                                     <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.UseRANSAC}" />
                                 </StackPanel>
-
-                                <TextBlock
-                                    Grid.Row="0"
-                                    Grid.Column="2"
-                                    Margin="5"
-                                    VerticalAlignment="Center"
-                                    Text="Robust RANSAC" />
-                                <StackPanel
-                                    Grid.Row="0"
-                                    Grid.Column="3"
-                                    Orientation="Horizontal">
-                                    <CheckBox
-                                        IsEnabled="{Binding InspectorOptions.UseRANSAC}"
-                                        Margin="5,0,0,0"
-                                        IsChecked="{Binding InspectorOptions.UseRANSACTriangles}" />
-                                </StackPanel>
-
                                 <TextBlock
                                     Grid.Row="1"
-                                    Grid.Column="0"
-                                    Margin="5"
-                                    VerticalAlignment="Center"
-                                    Text="Alternative matching logic" />
-                                <StackPanel
-                                    Grid.Row="1"
-                                    Grid.Column="1"
-                                    Orientation="Horizontal">
-                                    <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.UseAlternativeMatching}" />
-                                </StackPanel>
-
-                                <TextBlock
-                                    Grid.Row="1"
-                                    Grid.Column="2"
-                                    Margin="5"
-                                    VerticalAlignment="Center"
-                                    Text="Maximum number of stars per region" />
-                                <StackPanel
-                                    Grid.Row="1"
-                                    Grid.Column="3"
-                                    Orientation="Horizontal">
-                                    <ninactrl:HintTextBox
-                                        IsEnabled="{Binding InspectorOptions.UseAlternativeMatching}"
-                                        MinWidth="40"
-                                        VerticalAlignment="Center"
-                                        HorizontalContentAlignment="Left"
-                                        VerticalContentAlignment="Center"
-                                        Foreground="{StaticResource PrimaryBrush}"
-                                        HintText="{Binding InspectorOptions.MaxStarsPerRegionHint}"
-                                        TextAlignment="Left"
-                                        ToolTip="If set, this value may be used as a starting point by the process to achieve a good set of matched stars across all regions of all images.  Leave this blank to use the previously successful value as the starting point">
-                                        <ninactrl:HintTextBox.Text>
-                                            <Binding
-                                                Converter="{StaticResource HF_DoubleNegativeToEmptyStringConverter}"
-                                                Mode="TwoWay"
-                                                Path="InspectorOptions.MaxStarsPerRegion"
-                                                UpdateSourceTrigger="LostFocus" />
-                                        </ninactrl:HintTextBox.Text>
-                                    </ninactrl:HintTextBox>
-                                </StackPanel>
-
-                                <TextBlock
-                                    Grid.Row="2"
                                     Grid.Column="0"
                                     Margin="5"
                                     VerticalAlignment="Center"
                                     Text="Outlier rejection" />
                                 <StackPanel
-                                    Grid.Row="2"
+                                    Grid.Row="1"
                                     Grid.Column="1"
                                     Orientation="Horizontal">
                                     <CheckBox
@@ -1595,26 +1536,26 @@
                                 </StackPanel>
 
                                 <TextBlock
-                                    Grid.Row="3"
+                                    Grid.Row="2"
                                     Grid.Column="0"
                                     Margin="5"
                                     VerticalAlignment="Center"
                                     Text="Match using brightness" />
                                 <StackPanel
-                                    Grid.Row="3"
+                                    Grid.Row="2"
                                     Grid.Column="1"
                                     Orientation="Horizontal">
                                     <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.RejectBadBrightnessMatches}" />
                                 </StackPanel>
 
                                 <TextBlock
-                                    Grid.Row="3"
+                                    Grid.Row="2"
                                     Grid.Column="2"
                                     Margin="5"
                                     VerticalAlignment="Center"
                                     Text="Starting Brightness Tolerance" />
                                 <StackPanel
-                                    Grid.Row="3"
+                                    Grid.Row="2"
                                     Grid.Column="3"
                                     Orientation="Horizontal">
                                     <ninactrl:HintTextBox
@@ -1638,26 +1579,26 @@
                                 </StackPanel>
 
                                 <TextBlock
-                                    Grid.Row="4"
+                                    Grid.Row="3"
                                     Grid.Column="0"
                                     Margin="5"
                                     VerticalAlignment="Center"
                                     Text="Save annotated images when rerunning a saved autofocus" />
                                 <StackPanel
-                                    Grid.Row="4"
+                                    Grid.Row="3"
                                     Grid.Column="1"
                                     Orientation="Horizontal">
                                     <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.SaveImagesOnReruns}" />
                                 </StackPanel>
                                 <TextBlock
-                                    Grid.Row="4"
+                                    Grid.Row="3"
                                     Grid.Column="2"
                                     Margin="5"
                                     VerticalAlignment="Center"
                                     Text="Also save alignment images" />
                                 <StackPanel
                                     IsEnabled="{Binding InspectorOptions.SaveImagesOnReruns}"
-                                    Grid.Row="4"
+                                    Grid.Row="3"
                                     Grid.Column="3"
                                     Orientation="Horizontal">
                                     <CheckBox Margin="5,0,0,0" IsChecked="{Binding InspectorOptions.SaveAlignmentImages}" />

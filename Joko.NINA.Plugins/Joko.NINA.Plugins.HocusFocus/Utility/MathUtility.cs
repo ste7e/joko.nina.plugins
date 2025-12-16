@@ -152,5 +152,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
             return points[maxError.i];
         }
+
+        public static double CalcDistance(Point2D p1, Point2D p2) {
+            return (p2.X - p1.X) * (p2.X - p1.X) + (p2.Y - p1.Y) * (p2.Y - p1.Y);
+        }
     }
 }

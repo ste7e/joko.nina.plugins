@@ -486,11 +486,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 }
 
                 if ((trianglesByImage != null) && (trianglesByImage.Count > imageIndex)) {
-                    //foreach (var tri in trianglesByImage[i].Where(t => !t.IsReference && !t.Matched)) {
-                    //    graphics.DrawLine(triPenUnmatched, tri.P1.AsPointF(), tri.P2.AsPointF());
-                    //    graphics.DrawLine(triPenUnmatched, tri.P2.AsPointF(), tri.P3.AsPointF());
-                    //    graphics.DrawLine(triPenUnmatched, tri.P3.AsPointF(), tri.P1.AsPointF());
-                    //}
                     foreach (var tri in trianglesByImage[imageIndex].Where(t => !t.IsReference && t.Matched)) {
                         graphics.DrawLine(triPenMatched, tri.P1.AsPointF(), tri.P2.AsPointF());
                         graphics.DrawLine(triPenMatched, tri.P2.AsPointF(), tri.P3.AsPointF());

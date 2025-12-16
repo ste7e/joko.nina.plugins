@@ -61,10 +61,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             rejectBadBrightnessMatches = optionsAccessor.GetValueBoolean(nameof(RejectBadBrightnessMatches), false);
             rejectBadlyFittingMatches = optionsAccessor.GetValueBoolean(nameof(RejectBadlyFittingMatches), false);
             useRANSAC = optionsAccessor.GetValueBoolean(nameof(UseRANSAC), true);
-            useAlternativeMatchinguseTrees = optionsAccessor.GetValueBoolean(nameof(UseAlternativeMatching), false);
             saveImagesOnReruns = optionsAccessor.GetValueBoolean(nameof(SaveImagesOnReruns), false);
             saveAlignmentImages = optionsAccessor.GetValueBoolean(nameof(SaveAlignmentImages), false);
-            useRANSACTriangles = optionsAccessor.GetValueBoolean(nameof(UseRANSACTriangles), false);
+            maxStarsPerRegion = optionsAccessor.GetValueInt32(nameof(MaxStarsPerRegion), -1);
         }
 
         public void ResetDefaults() {
@@ -369,19 +368,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             }
         }
 
-        private bool useAlternativeMatchinguseTrees = false;
-
-        public bool UseAlternativeMatching {
-            get => useAlternativeMatchinguseTrees;
-            set {
-                if (useAlternativeMatchinguseTrees != value) {
-                    useAlternativeMatchinguseTrees = value;
-                    optionsAccessor.SetValueBoolean(nameof(UseAlternativeMatching), useAlternativeMatchinguseTrees);
-                    RaisePropertyChanged();
-                }
-            }
-        }
-
         private bool rejectBadBrightnessMatches = false;
 
         public bool RejectBadBrightnessMatches {
@@ -458,19 +444,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 if (saveAlignmentImages != value) {
                     saveAlignmentImages = value;
                     optionsAccessor.SetValueBoolean(nameof(SaveAlignmentImages), saveAlignmentImages);
-                    RaisePropertyChanged();
-                }
-            }
-        }
-
-        private bool useRANSACTriangles = false;
-
-        public bool UseRANSACTriangles {
-            get => useRANSACTriangles;
-            set {
-                if (useRANSACTriangles != value) {
-                    useRANSACTriangles = value;
-                    optionsAccessor.SetValueBoolean(nameof(UseRANSACTriangles), useRANSACTriangles);
                     RaisePropertyChanged();
                 }
             }
