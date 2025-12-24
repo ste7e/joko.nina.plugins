@@ -135,14 +135,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             private bool isReference;   // just used for annotating images with triangles
             private double matchScore;
 
-            public Point2D P1 { get; }
-            public Point2D P2 { get; }
-            public Point2D P3 { get; }
+            public List<Point2D> Points;
+            public Point2D P1 { get => Points[0]; }
+            public Point2D P2 { get => Points[1]; }
+            public Point2D P3 { get => Points[2]; }
 
             public StarTriangle(System.Drawing.Size imageSize, double minBrightness, double maxBrightness, Point2D p1, Point2D p2, Point2D p3, bool isReference, int referenceID) {
-                P1 = p1;
-                P2 = p2;
-                P3 = p3;
+                Points = new List<Point2D> { p1, p2, p3 }.OrderBy(p => (p == p1) ? 0 : AngleFromHorizontal(p1, p)).ToList();
                 this.isReference = isReference;
                 if (isReference) {
                     this.referenceID = referenceID;
@@ -154,8 +153,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
 
             private List<double> normalizeLength() {
-                var squaredLengths = new List<double> { lineLengthSquared(P1, P2), lineLengthSquared(P2, P3), lineLengthSquared(P3, P1) }.Order().ToList();
-                double shortestSquaredLength = squaredLengths.First();
+                var squaredLengths = new List<double> {
+                    lineLengthSquared(Points[0], Points[1]),
+                    lineLengthSquared(Points[1], Points[2]),
+                    lineLengthSquared(Points[2], Points[0]) }.ToList();
+                double shortestSquaredLength = squaredLengths.Min();
                 for (int i = 0; i < squaredLengths.Count; i++) {
                     squaredLengths[i] /= shortestSquaredLength;
                 }
@@ -163,7 +165,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
 
             private List<double> normalizeBrightnesses(double minBrightness, double maxBrightness) {
-                var brightnesses = new List<double> { P1.NormalisedBrightness, P2.NormalisedBrightness, P3.NormalisedBrightness }.ToList();
+                var brightnesses = Points.Select(p => p.NormalisedBrightness).ToList();
                 double range = maxBrightness - minBrightness;
                 for (int i = 0; i < brightnesses.Count; i++) {
                     brightnesses[i] = (brightnesses[i] - minBrightness) / range;
@@ -173,7 +175,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
             private List<Point2D> normalizePositions(System.Drawing.Size imageSize, double minBrightness, double maxBrightness) {
                 var normPos = new List<Point2D>();
-                foreach (var p in new List<Point2D> { P1, P2, P3 }) {
+                foreach (var p in Points) {
                     normPos.Add(new Point2D(
                         p.X / imageSize.Width,
                         p.Y / imageSize.Height,
@@ -231,7 +233,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             public int ReferenceID { get => referenceID; }
 
             public override string ToString() {
-                return $"StarTriangle: ({P1.X}, {P1.Y}), ({P2.X}, {P2.Y}), ({P3.X}, {P3.Y})";
+                return $"StarTriangle: ({Points[0].X}, {P1.Y}), ({P2.X}, {P2.Y}), ({P3.X}, {P3.Y})";
             }
 
             public void MarkAsMatched(int referenceID, double matchScore) {
@@ -264,6 +266,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
             double angleRad = Math.Acos(cosAngle);
             return angleRad;
+        }
+
+        public static double AngleFromHorizontal(Point2D a, Point2D b) {
+            return Math.Atan2(b.Y - a.Y, b.X - a.X);
         }
 
         public static List<StarTriangle> BuildStarTriangles(System.Drawing.Size imageSize, List<Point2D> point2Ds, int searchSquareSide, bool onePerPoint, bool isReference) {
