@@ -135,7 +135,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             private bool isReference;   // just used for annotating images with triangles
             private double matchScore;
 
-            public List<Point2D> Points;
+            public List<Point2D> Points { get; private set; }
             public Point2D P1 { get => Points[0]; }
             public Point2D P2 { get => Points[1]; }
             public Point2D P3 { get => Points[2]; }
@@ -156,7 +156,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 var squaredLengths = new List<double> {
                     lineLengthSquared(Points[0], Points[1]),
                     lineLengthSquared(Points[1], Points[2]),
-                    lineLengthSquared(Points[2], Points[0]) }.ToList();
+                    lineLengthSquared(Points[2], Points[0]) };
                 double shortestSquaredLength = squaredLengths.Min();
                 for (int i = 0; i < squaredLengths.Count; i++) {
                     squaredLengths[i] /= shortestSquaredLength;
