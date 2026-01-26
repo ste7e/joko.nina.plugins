@@ -2388,6 +2388,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -2668,7 +2669,7 @@
                             </TextBlock>
                         </Grid>
                         <Grid
-                            Grid.Row="3"
+                            Grid.Row="4"
                             Grid.Column="0"
                             HorizontalAlignment="Center">
                             <Grid.Resources>
@@ -2724,6 +2725,36 @@
                                             </Style>
                                         </DataGridTextColumn.ElementStyle>
                                     </DataGridTextColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                        <Grid
+                            Grid.Row="3"
+                            Grid.Column="0"
+                            HorizontalAlignment="Center">
+
+                            <DataGrid
+                                Grid.Row="0"
+                                Margin="10,5,10,0"
+                                HorizontalAlignment="Center"
+                                AutoGenerateColumns="False"
+                                ColumnWidth="Auto"
+                                IsReadOnly="True"
+                                HeadersVisibility="None"
+                                ItemsSource="{Binding SensorModel.RegistrationAndFitReport}">
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn>
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Foreground="Red">
+                                                    Warning:
+                                                </TextBlock>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn
+                                        Width="Auto"
+                                        Binding="{Binding}" />
                                 </DataGrid.Columns>
                             </DataGrid>
                         </Grid>

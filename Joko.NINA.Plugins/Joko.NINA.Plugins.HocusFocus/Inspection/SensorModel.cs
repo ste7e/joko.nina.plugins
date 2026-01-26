@@ -23,6 +23,7 @@ using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.Utility;
 using NINA.Profile.Interfaces;
 using OpenCvSharp;
+using OpenTK.Graphics.ES11;
 using OxyPlot.Series;
 using System;
 using System.Collections.Generic;
@@ -127,6 +128,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 var imageSize = firstStarDetectionResult.ImageSize;
                 var pixelSize = firstStarDetectionResult.PixelSize;
                 Logger.Info($"Building Sensor Model. FRatio ({fRatio}), Focuser Size ({focuserSizeMicrons}), Pixel Size ({pixelSize}), Image size ({imageSize})");
+
+                RegistrationAndFitReport.Clear();
 
                 var (solution, fitResult) = RegisterStarsAndFit(allDetectedStars,
                     pixelSize: pixelSize,
@@ -381,6 +384,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     ransacAligned = AlignStarsWithRANSAC(allDetectedStars, imageSize, stopwatch, ReferenceImage, progress);
                     if (ransacAligned < allDetectedStars.Count) {
                         Logger.Info("Ransac failed on at least one image.  Search radius will remain the same as for non-aligned processing");
+                        RegistrationAndFitReport.Add($"{allDetectedStars.Count - ransacAligned} frames failed to align.  An autofocus run where all images align will give more reliable results.");
                     }
                 }
                 ct.ThrowIfCancellationRequested();
@@ -513,6 +517,14 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 }
                 if (bestPfit.GoodnessOfFit < 0.05) {
                     throw new Exception($"Sensor modeling failed. R² = {bestPfit.GoodnessOfFit:#.00}");
+                }
+
+                if (bestPfit.StarsInModel < 10) {
+                    if (inspectorOptions.UseRANSAC) {
+                        RegistrationAndFitReport.Add($"There are very few stars in the model ({bestPfit.StarsInModel}).  There may be poor transparancy or seeing.  Frames with more stars will give more reliable results.");
+                    } else{
+                        RegistrationAndFitReport.Add($"There are very few stars in the model ({bestPfit.StarsInModel}).  If there is movement between the frames, it may help to enable the 'align images' option.");
+                    }
                 }
 
                 return (bestPfit, bestReg);
@@ -947,6 +959,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
         public AsyncObservableCollection<SensorParaboloidTiltHistoryModel> SensorTiltHistoryModels { get; private set; }
 
         public SensorModelAberrationResult SensorModelResult { get; private set; } = new SensorModelAberrationResult();
+
+        public AsyncObservableCollection<String> RegistrationAndFitReport { get; private set; } = new();
 
         private SensorParaboloidModel displayedSensorModel;
 
