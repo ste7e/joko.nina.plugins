@@ -152,6 +152,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 normalizedPoints = normalizePositions(imageSize, minBrightness, maxBrightness);
             }
 
+            public bool SameTriangle(StarTriangle other) {
+                return ((this.P1 == other.P1) && (this.P2 == other.P2) && (this.P3 == other.P3));
+            }
+
             private List<double> normalizeLength() {
                 var squaredLengths = new List<double> {
                     lineLengthSquared(Points[0], Points[1]),
@@ -193,7 +197,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             public List<double> NormalizedLengths { get => normalizedLengths; }
             public List<double> NormalizedBrightnesses { get => normalizedBrightnesses; }
 
-            public double[] AsPositionVector() {
+            public double[] AsPositionMatrix() {
                 return new double[] {
                     normalizedPoints[0].X, normalizedPoints[0].Y,
                     normalizedPoints[1].X, normalizedPoints[1].Y,
@@ -201,7 +205,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 };
             }
 
-            public double[] AsShapeVector() {
+            public double[] AsShapeMatrix() {
                 return new double[] {
                     normalizedLengths[0],
                     normalizedLengths[1],
@@ -209,7 +213,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 };
             }
 
-            public double[] AsBrightnessVector() {
+            public double[] AsBrightnessMatrix() {
                 return new double[] {
                     NormalizedBrightnesses[0],
                     NormalizedBrightnesses[1],
@@ -217,7 +221,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 };
             }
 
-            public double[] AsShapeAndBrightnessVector() {
+            public double[] AsShapeAndBrightnessMatrix() {
                 return new double[] {
                     normalizedLengths[0],
                     normalizedLengths[1],
@@ -312,7 +316,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                         for (int k = j + 1; k < nearbyPoints.Count; k++) {
                             var p3 = nearbyPoints[k];
                             var triangle = new StarTriangle(imageSize, minBrightness, maxBrightness, pt, p2, p3, isReference, id++);
-                            triangles.Add(triangle);
+                            if (triangles.Count(tri => tri.SameTriangle(triangle)) == 0)    // avoid duplicates
+                                triangles.Add(triangle);
                         }
                     }
                 }
@@ -337,20 +342,18 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 StarTriangle bestMatch = null;
                 List<(StarTriangle, double)> matches = new();
                 foreach (var imageTriangle in imageTriangles.Where(t => !t.Matched)) {
-                    var cosSim = CosineSimilarity(referenceTriangle.AsShapeVector(), imageTriangle.AsShapeVector());
-
-                    if (cosSim > bestCosSimLoc) {
+                    var cosSim = CosineSimilarity(referenceTriangle.AsShapeMatrix(), imageTriangle.AsShapeMatrix());
+                    if (cosSim > minCosSim) {
                         matches.Add((imageTriangle, cosSim));
-                        bestCosSimLoc = cosSim;
-                        bestMatch = imageTriangle;
                     }
                 }
-                // examine matches and pick best on brightness
-                double bestCosSimBri = 0;
 
                 if (matches.Count > 1) {
+                    // examine matches and pick best on brightness - these matches are already pretty close matches based on location (>0.99999)
+                    double bestCosSimBri = 0;
+
                     foreach (var (tri, cs) in matches) {
-                        var cosSim = CosineSimilarity(referenceTriangle.AsBrightnessVector(), tri.AsBrightnessVector());
+                        var cosSim = CosineSimilarity(referenceTriangle.AsBrightnessMatrix(), tri.AsBrightnessMatrix());
 
                         if (cosSim > bestCosSimBri) {
                             bestMatch = tri;
@@ -358,14 +361,21 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                         }
                     }
                     //Logger.Debug($"Multiple ({matches.Count}) matches for ref triangle {i} - selected triangle with briCosSim of {bestCosSimBri}");
+                } else {
+                    if (matches.Count == 1) {
+                        var best = matches.First();
+                        bestMatch = best.Item1;
+                        bestCosSimLoc = best.Item2;
+                    }
                 }
 
-                if ((bestMatch != null) && (bestCosSimLoc > minCosSim)) {
+                if (bestMatch != null) {
                     srcPoints.AddRange(new List<Point2D> { bestMatch.P1, bestMatch.P2, bestMatch.P3 });
                     dstPoints.AddRange(new List<Point2D> { referenceTriangle.P1, referenceTriangle.P2, referenceTriangle.P3 });
                     bestMatch.MarkAsMatched(referenceTriangle.ReferenceID, bestCosSimLoc);
                 }
             }
+
 
             return (srcPoints, dstPoints);
         }

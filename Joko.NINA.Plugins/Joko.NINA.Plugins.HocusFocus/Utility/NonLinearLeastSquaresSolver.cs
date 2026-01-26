@@ -91,15 +91,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             ApplicationStatus status = new ApplicationStatus() {
                 Status = "Solving",
                 MaxProgress = maxWinsorizedIterations,
-                ProgressType=ApplicationStatus.StatusProgressType.ValueOfMaxValue,
+                ProgressType = ApplicationStatus.StatusProgressType.ValueOfMaxValue,
                 Progress = 0
             };
 
             while (disabledCount > 0 && winsorizedIterations++ < maxWinsorizedIterations) {
                 status.Progress++;
-                if (progress != null) {
-                    progress.Report(status);
-                }
+                progress?.Report(status);
                 var nextSolution = SolveWithInitialGuess(solver, initialGuess, maxIterationsLS, toleranceLS, ct);
                 var iterationSolutionArray = nextSolution.ToArray();
 

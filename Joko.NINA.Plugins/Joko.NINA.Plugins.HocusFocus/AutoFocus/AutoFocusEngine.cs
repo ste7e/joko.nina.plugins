@@ -1390,9 +1390,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 foreach (var focuserPositionGroup in savedFiles.GroupBy(f => f.FocuserPosition)) {
                     var focuserPosition = focuserPositionGroup.Key;
 
-                    // Previous versions mistakenly saved the initial image in the attempt folder, which led to duplicate key exceptions
-                    //var imageNumber = focuserPositionGroup.Max(g => g.ImageNumber);
-                    var files = focuserPositionGroup./*Where(g => g.ImageNumber == imageNumber).*/OrderBy(g => g.FrameNumber).ToList();
+                    var files = focuserPositionGroup.OrderBy(g => g.FrameNumber).ToList();
                     var allMeasurementTasks = new List<Task>();
                     foreach (var savedFile in files) {
                         var imageState = await state.OnNextImage(savedFile.FrameNumber, savedFile.FocuserPosition, false, token);

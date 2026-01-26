@@ -380,8 +380,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 if (inspectorOptions.UseRANSAC) {
                     ransacAligned = AlignStarsWithRANSAC(allDetectedStars, imageSize, stopwatch, ReferenceImage, progress);
                     if (ransacAligned < allDetectedStars.Count) {
-                        Logger.Info("Ransac failed, reverting to non-aligned processing");
-                        //ResetRegistration(allDetectedStars);
+                        Logger.Info("Ransac failed on at least one image.  Search radius will remain the same as for non-aligned processing");
                     }
                 }
                 ct.ThrowIfCancellationRequested();
@@ -688,9 +687,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             var referenceStars = allDetectedStars[referenceImage].StarDetectionResult.StarList
                 .Select(s => new Point2D(s.Position.X, s.Position.Y, ((HocusFocusDetectedStar)s).NormalisedBrightness));
 
-            double maxNormalisedBrightnessDiff = .1d;
-            int maxDistanceForPutativeMatch = 100;
-
             // first pass - build list of triangles in reference image
             int maxTriangleSize;
             List<RANSACRegistration.StarTriangle> refTriangles;
@@ -863,8 +859,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                         queuedCount++;
                     }
                     int rejectedOnBrightness = globalNeighbors.Count() - queuedCount;
-                    //if (rejectedOnBrightness > 0)
-                    //    Logger.Info($"ImageStar: {imageIndex}/{sourceIndex}, {rejectedOnBrightness} matches out of {globalNeighbors.Count()} rejected on brightness difference (>{maxNormalisedBrightnessDiff})");
+                    if (rejectedOnBrightness > 0)
+                        Logger.Info($"ImageStar: {imageIndex}/{sourceIndex}, {rejectedOnBrightness} matches out of {globalNeighbors.Count()} rejected on brightness difference (>{maxNormalisedBrightnessDiff})");
                     totalRejectionsOnBrightness += rejectedOnBrightness;
                 }
 
@@ -920,223 +916,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             }
 
             return (registeredStars, totalRejectionsOnBrightness);
-        }
-
-        private (RegisteredStar[], int) MatchStarsWithoutKdTree(
-            List<SensorDetectedStars> allDetectedStars,
-            System.Drawing.Size imageSize,
-            MultiStopWatch stopwatch,
-            int referenceImage,
-            int searchSquareSide,
-            double maxRelativeBrightnessDiff,
-            int maxBrightestPerRegion,
-            IProgress<ApplicationStatus> progress) {
-            Logger.Debug("MatchStarsWithoutKdTree");
-
-            List<StarDetectionRegion> regions = CreateFullRegionSet(imageSize, 2, 3);
-            RegisteredStar[] registeredStars = new RegisteredStar[0];
-
-            // create dictionary of stars in the reference image
-            Dictionary<Point2D, List<MatchedStar>> starDict = new(allDetectedStars.Count * allDetectedStars[referenceImage].StarDetectionResult.StarList.Count);
-            foreach (var star in allDetectedStars[referenceImage].StarDetectionResult.StarList
-                .Select(star => (HocusFocusDetectedStar)star)) {
-                starDict.Add(new Point2D(star.Position.X, star.Position.Y, star.NormalisedBrightness), new List<MatchedStar>() { new MatchedStar() {
-                                FocuserPosition = allDetectedStars[referenceImage].FocuserPosition,
-                                Star = (HocusFocusDetectedStar)star,
-                                ImageIndex = referenceImage
-                            } });
-            }
-
-            int allStarCount = starDict.Count;
-            int minMatchPct = 10;   // proportion of images that must have star for star to be included
-            //double minBrightness = starDict.Keys.OrderBy(s => s.NormalisedBrightness).ElementAt((int)(allStarCount * .05)).NormalisedBrightness; // min set allow 95% of stars
-            //Logger.Debug($"Minimum brightness set to {minBrightness}");
-
-            // remove the dimmest stars so we only keep the brightest ones
-            //int brightestStarCount = allStarCount;
-            //if (minBrightness != 0) {
-            //    foreach (var pt in starDict.Keys.Where(pt => pt.NormalisedBrightness < minBrightness))
-            //        starDict.Remove(pt);
-            //    brightestStarCount = starDict.Count;
-            //}
-            int rejectionsOnBrightness = 0;
-
-            stopwatch.RecordEntry("Dictionary");
-
-            ApplicationStatus status = new ApplicationStatus() {
-                Status = "Matching stars",
-                Status2 = "Image",
-                MaxProgress2 = allDetectedStars.Count,
-                ProgressType2 = ApplicationStatus.StatusProgressType.ValueOfMaxValue,
-            };
-
-            // in other images find stars that are close to the reference image
-            for (int i = 0; i < allDetectedStars.Count; ++i) {
-                if (i == referenceImage) { // skip the reference image
-                    continue;
-                }
-                rejectionsOnBrightness = MatchStarsByNN(allDetectedStars, searchSquareSide, maxRelativeBrightnessDiff, progress, starDict, status, i);
-            }
-
-            stopwatch.RecordEntry("Match");
-
-            int starCount = starDict.Count;
-            status.Status = "Examining region";
-            status.MaxProgress = regions.Count;
-            status.ProgressType = ApplicationStatus.StatusProgressType.ValueOfMaxValue;
-            status.Progress = 0;
-            int regionNumber = 0;
-            foreach (var region in regions) {
-                regionNumber++;
-                status.Progress++;
-                progress.Report(status);
-
-                var starsInRegion = starDict.Keys
-                    .Where(pt => (region.OuterBoundary.ToRect2D(imageSize).Contains(pt.X, pt.Y)));
-
-                RegisteredStar[] registeredStarsInRegion = new RegisteredStar[0];
-                for (int matchPct = 100; matchPct > minMatchPct; matchPct -= 10) {
-                    int matchCount = 0;
-
-                    // restrict stars to brightest [maxBrightestPerRegion] within this region
-                    var starsByBrightness = starsInRegion.OrderByDescending(s => s.NormalisedBrightness).ToList();
-                    if ((maxBrightestPerRegion > -1) && (starsByBrightness.Count() > maxBrightestPerRegion)) {
-                        starsByBrightness = starsByBrightness.Take(maxBrightestPerRegion).ToList();
-                        Logger.Info($"{starsInRegion.Count()} stars in region {regionNumber} reduced to brightest {starsByBrightness.Count}");
-                    }
-
-                    int minStarsPerRegion = Math.Max(starsByBrightness.Count / 4, 15);  // minimum of 25% of detected stars must be matched or 15 whichever is higher
-                    Logger.Info($"Region {regionNumber}: MinStarsPerRegion set to {minStarsPerRegion} ({starsByBrightness.Count} total stars in this region)");
-
-                    registeredStarsInRegion = starsByBrightness
-                        .Where(pt => (region.OuterBoundary.ToRect2D(imageSize).Contains(pt.X, pt.Y)) &&    // just this region
-                                    (starDict[pt].Count >= allDetectedStars.Count * matchPct / 100))   // only use stars that are matched by matchPct% of the images
-                        .Select(pt => {
-                            var rs = new RegisteredStar() {
-                                RegistrationX = pt.X,
-                                RegistrationY = pt.Y,
-                            };
-                            foreach (var focuserPositionGroup in starDict[pt].GroupBy(s => s.FocuserPosition)) {
-                                var focuserPosition = focuserPositionGroup.Key;
-                                var firstStarIngroup = focuserPositionGroup.First().Star;
-                                MatchedStar aveStar = new MatchedStar() {
-                                    FocuserPosition = focuserPosition,
-                                    Star = new() {
-                                        BoundingBox = firstStarIngroup.BoundingBox,
-                                        Position = firstStarIngroup.Position,
-                                        OriginalPosition = firstStarIngroup.OriginalPosition,
-                                        PSF = firstStarIngroup.PSF,
-                                        Background = focuserPositionGroup.Average(g => g.Star.Background),
-                                        AverageBrightness = focuserPositionGroup.Average(g => g.Star.AverageBrightness),
-                                        HFR = focuserPositionGroup.Average(g => g.Star.HFR),
-                                        MaxBrightness = focuserPositionGroup.Average(g => g.Star.MaxBrightness),
-                                    },
-                                    ImageIndex = focuserPositionGroup.First().ImageIndex
-                                };
-                                rs.MatchedStars.Add(aveStar);
-                            }
-                            matchCount++;
-                            return rs;
-                        }).ToArray();
-
-                    if (matchCount > minStarsPerRegion) { // enough stars so stop now
-                        Logger.Debug($"Region {region.Index}: {matchCount} stars matched with with matchPct set to {matchPct}");
-                        break;
-                    }
-                    Logger.Debug($"Region {region.Index}: Too few stars ({matchCount}) with matchPct set to {matchPct}");
-                }
-                registeredStars = registeredStars.Concat(registeredStarsInRegion).ToArray();
-            }
-
-            stopwatch.RecordEntry("NonTree-based registration");
-
-            //if (minBrightness > 0) {
-            //    Logger.Info($"Of all {allStarCount} stars found, {brightestStarCount} stars were selected on brightness (> {minBrightness})");
-            //}
-            Logger.Info($"{starCount} stars were registered and matched to stars in other images.  Stars on enough images are {registeredStars.Length}");
-            return (registeredStars, rejectionsOnBrightness);
-        }
-
-        private static int MatchStarsByNN(
-            List<SensorDetectedStars> allDetectedStars,
-            int searchSquareSide,
-            double maxRelativeBrightnessDiff,
-            IProgress<ApplicationStatus> progress,
-            Dictionary<Point2D, List<MatchedStar>> starDict,
-            ApplicationStatus status,
-            int imageIndex) {
-            int rejectionsOnBrightness = 0;
-            status.Progress2 = imageIndex;
-            int matches = 0;
-            double totalDistance = 0;
-            foreach (var star in allDetectedStars[imageIndex].StarDetectionResult.StarList
-                .Select(star => (HocusFocusDetectedStar)star)) {
-                var searchPoint = new Point2D(star.Position.X, star.Position.Y, star.NormalisedBrightness);
-                var searchArea = new Rect2d(searchPoint.X - searchSquareSide, searchPoint.Y - searchSquareSide, searchSquareSide * 2 + 1, searchSquareSide * 2 + 1);
-                // find a star in the reference image that is within the search area and closest to the current star
-                var starKeysInArea = starDict.Keys
-                    .Where(p => searchArea.Contains(p.X, p.Y));
-                var refStarPos =
-                    (maxRelativeBrightnessDiff == -1 ?
-                        starKeysInArea :
-                        starKeysInArea.Where(p => (Math.Abs(star.NormalisedBrightness - p.NormalisedBrightness) < maxRelativeBrightnessDiff))
-                    )
-                    .OrderBy(p => DistanceSquared(p, searchPoint))
-                    .FirstOrDefault();
-                if (maxRelativeBrightnessDiff != -1) {
-                    rejectionsOnBrightness += starKeysInArea
-                            .Where(p => (Math.Abs(star.NormalisedBrightness - p.NormalisedBrightness) >= maxRelativeBrightnessDiff)).Count();
-                }
-                if (refStarPos != null) {
-                    double distance = Math.Sqrt(DistanceSquared(refStarPos, searchPoint));
-                    starDict[refStarPos].Add(new MatchedStar() {
-                        FocuserPosition = allDetectedStars[imageIndex].FocuserPosition,
-                        Star = (HocusFocusDetectedStar)star,
-                        ImageIndex = imageIndex
-                    });
-                    totalDistance += distance;
-                    matches++;
-                }
-            }
-
-            Logger.Info($"Image {imageIndex}: MatchNN: matches={matches}, average distance={totalDistance / matches:0.####}");
-            return rejectionsOnBrightness;
-        }
-
-        private static double DistanceSquared(Point2D p1, Point2D p2) {
-            return DistanceSquared(p1.X, p1.Y, p2.X, p2.Y);
-        }
-
-        private static int DistanceSquared(int x1, int y1, int x2, int y2) {
-            int xDist = x1 - x2;
-            int yDist = y1 - y2;
-            return (xDist * xDist + yDist * yDist);
-        }
-
-        private static double DistanceSquared(double x1, double y1, double x2, double y2) {
-            double xDist = x1 - x2;
-            double yDist = y1 - y2;
-            return (xDist * xDist + yDist * yDist);
-        }
-
-        private static double DistanceSquared(double[] p1, double[] p2) {
-            double ret = 0d;
-            for (int i = 0; i < p1.Length; i++) {
-                double dist = p1[i] - p2[i];
-                ret += dist * dist;
-            }
-
-            return ret;
-        }
-
-        private static double DistanceSquared(float[] p1, float[] p2) {
-            float ret = 0f;
-            for (int i = 0; i < p1.Length; i++) {
-                float dist = p1[i] - p2[i];
-                ret += dist * dist;
-            }
-
-            return ret;
         }
 
         private void UpdateTiltModels(SensorParaboloidTiltHistoryModel historyModel) {
