@@ -2741,12 +2741,14 @@
                                 ColumnWidth="Auto"
                                 IsReadOnly="True"
                                 HeadersVisibility="None"
+                                BorderBrush="Red"
+                                Visibility="{Binding SensorModel.RegistrationAndFitReport, Converter={StaticResource HF_EmptyCollectionToVisibilityCollapsedConverter}}"
                                 ItemsSource="{Binding SensorModel.RegistrationAndFitReport}">
                                 <DataGrid.Columns>
                                     <DataGridTemplateColumn>
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <TextBlock Foreground="Red">
+                                                <TextBlock Foreground="Black" Background="Yellow">
                                                     Warning:
                                                 </TextBlock>
                                             </DataTemplate>

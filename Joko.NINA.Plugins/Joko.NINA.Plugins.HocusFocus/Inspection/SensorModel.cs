@@ -108,6 +108,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             this.autoFocusOptions = autoFocusOptions;
             this.alglibAPI = alglibAPI;
             SensorTiltHistoryModels = new AsyncObservableCollection<SensorParaboloidTiltHistoryModel>();
+            RegistrationAndFitReport.CollectionChanged += RegistrationAndFitReport_CollectionChanged;
+        }
+
+        private void RegistrationAndFitReport_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) {
+            RaisePropertyChanged("RegistrationAndFitReport");
         }
 
         public Task UpdateModel(
@@ -384,7 +389,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     ransacAligned = AlignStarsWithRANSAC(allDetectedStars, imageSize, stopwatch, ReferenceImage, progress);
                     if (ransacAligned < allDetectedStars.Count) {
                         Logger.Info("Ransac failed on at least one image.  Search radius will remain the same as for non-aligned processing");
-                        RegistrationAndFitReport.Add($"{allDetectedStars.Count - ransacAligned} frames failed to align.  An autofocus run where all images align will give more reliable results.");
+                        if (ransacAligned == 1) { // ransacAligned starts at 1 for the reference image so if it's still 1 it means no other images aligned
+                            RegistrationAndFitReport.Add("All frames failed to align.  An autofocus run where all images align will give more reliable results.");
+                        } else {
+                            RegistrationAndFitReport.Add($"{allDetectedStars.Count - ransacAligned} frames failed to align.  An autofocus run where all images align will give more reliable results.");
+                        }
                     }
                 }
                 ct.ThrowIfCancellationRequested();
@@ -522,7 +531,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 if (bestPfit.StarsInModel < 10) {
                     if (inspectorOptions.UseRANSAC) {
                         RegistrationAndFitReport.Add($"There are very few stars in the model ({bestPfit.StarsInModel}).  There may be poor transparancy or seeing.  Frames with more stars will give more reliable results.");
-                    } else{
+                    } else {
                         RegistrationAndFitReport.Add($"There are very few stars in the model ({bestPfit.StarsInModel}).  If there is movement between the frames, it may help to enable the 'align images' option.");
                     }
                 }
@@ -736,6 +745,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
             TrianglesByImage.Add(referenceImage, refTriangles);
             Logger.Info($"Image {referenceImage}: {refTriangles.Count} triangles (REFERENCE), max size: {maxTriangleSize} ({sizeAsPortion}), stars: {referenceStars.Count()}");
 
+            int TooFewTrianglesImages = 0;
             for (int imageIndex = 0; imageIndex < allDetectedStars.Count; ++imageIndex) {
                 if (imageIndex == referenceImage) {
                     allDetectedStars[imageIndex].HasBeenAligned = true;
@@ -758,6 +768,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 var theseTriangles = RANSACRegistration.BuildStarTriangles(imageSize, theseStars.ToList(), maxTriangleSize, false, false);
                 Logger.Info($"Image {imageIndex}: {theseTriangles.Count} triangles");
                 TrianglesByImage.Add(imageIndex, theseTriangles);
+
+                if (theseTriangles.Count < minTri) {
+                    TooFewTrianglesImages++;
+                }
 
                 // match triangles to reference triangles to get putative matches
                 (putativeSrc, putativeDst) = RANSACRegistration.GeneratePutativeMatchesUsingSimilarTriangles(
@@ -799,6 +813,19 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                 } catch (Exception ex) {
                     Logger.Info($"Image {imageIndex}: Error: {ex.Message}");
                     allDetectedStars[imageIndex].HasBeenAligned = false;
+                }
+            }
+
+            if (TooFewTrianglesImages > 0) {
+                if (refTriangles.Count < minTri) {
+                    TooFewTrianglesImages++;    // include the reference image in this message
+                }
+                var imageCount = (TooFewTrianglesImages == allDetectedStars.Count) ? "All" : TooFewTrianglesImages.ToString();
+                RegistrationAndFitReport.Add($"{imageCount} images had too few star triangles for reliable alignment.  Alignment may have failed for these images.  Check image quality or star detection parameters.");
+            } else {
+                if (refTriangles.Count < minTri) {
+                    Logger.Warning("Too few star triangles found in reference image for reliable alignment.  Alignment may fail.");
+                    RegistrationAndFitReport.Add("Too few star triangles found in reference image for reliable alignment.  Check image quality or star detection parameters.");
                 }
             }
 
