@@ -439,7 +439,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     graphics.DrawLine(triPenReference, starX + xLength, starY - yLength, starX - xLength, starY + yLength);
                 }
 
-                bool aligned = false;
                 for (int starIdx = 0; starIdx < registeredStars.Length; starIdx++) {
                     var star = registeredStars[starIdx];
                     var starCenterPen = pens[starIdx % pens.Length];
@@ -457,7 +456,6 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                             graphics.DrawString(starIdx.ToString(), annotationFont, annotationBrush, new PointF(matchedStar.Star.Position.X, matchedStar.Star.Position.Y - yLength));
 
                             if (matchedStar.Star.OriginalPosition.X > 0 || matchedStar.Star.OriginalPosition.Y > 0) {
-                                aligned = true;
                                 if (referenceImage != matchedStar.ImageIndex) {
                                     // image has been aligned with reference - draw line
                                     Rectangle rectOriginal = new Rectangle(
@@ -482,6 +480,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                         graphics.DrawString($"Image: {imageIndex}, Reference image", annotationFont, infoBrush, new PointF(0, 0));
                     } else {
                         graphics.DrawString($"Image: {imageIndex}, Ref: {referenceImage}", annotationFont, infoBrush, new PointF(0, 0));
+                        graphics.DrawString($"Transform: {detectedStars.AlignmentTransform.ToFullString()}", new Font("Arial", 12), new SolidBrush(DrawingColor.White), new PointF(0, 20));
                     }
                 }
 
@@ -532,6 +531,16 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
                     graphics.FillEllipse(new SolidBrush(DrawingColor.FromArgb((int)(Math.Min(64 + (star.AverageBrightness * 50 * 191), 255)), DrawingColor.White)), star.BoundingBox);
                 }
+
+                graphics.DrawString($"Image: {imageIndex}, {(detectedStars.HasBeenAligned ? $"Aligned to Ref: {referenceImage}" : "Not aligned")}", new Font("Arial", 12), new SolidBrush(DrawingColor.White), new PointF(0, 0));
+                if (detectedStars.HasBeenAligned) {
+                    if (imageIndex == referenceImage) {
+                        graphics.DrawString($"Reference image", new Font("Arial", 12), new SolidBrush(DrawingColor.White), new PointF(0, 20));
+                    } else {
+                        graphics.DrawString($"Transform: {detectedStars.AlignmentTransform.ToFullString()}", new Font("Arial", 12), new SolidBrush(DrawingColor.White), new PointF(0, 20));
+                    }
+                }
+
                 var img = ImageUtility.ConvertBitmap(newBitmap, PixelFormats.Bgr24);
                 img.Freeze();
 

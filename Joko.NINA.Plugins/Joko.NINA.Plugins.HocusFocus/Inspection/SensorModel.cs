@@ -49,6 +49,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
         public HocusFocusStarDetectionResult StarDetectionResult { get; private set; }
         public IRenderedImage Image { get; private set; }
         public bool HasBeenAligned { get; set; }
+        public Matrix3x2? AlignmentTransform { get; set; }
 
         public override string ToString() {
             return $"{{{nameof(FocuserPosition)}={FocuserPosition.ToString()}, {nameof(StarDetectionResult)}={StarDetectionResult}}}";
@@ -792,6 +793,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Inspection {
                     Logger.Info($"Image {imageIndex}, putative star matches: {putativeDst.Count} out of {theseStars.Count()} stars");
                     // calculate the transform needed to register this image
                     var transform = RANSACRegistration.EstimateAffineTransform(putativeSrc, putativeDst, status, progress);
+                    allDetectedStars[imageIndex].AlignmentTransform = transform;
 
                     // adjust each star according to the transform
                     for (int starIndex = 0; starIndex < allDetectedStars[imageIndex].StarDetectionResult.StarList.Count; starIndex++) {

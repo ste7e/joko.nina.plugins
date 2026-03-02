@@ -60,7 +60,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             startingBrightnessDiff = optionsAccessor.GetValueDouble(nameof(StartingBrightnessDiff), -1);
             rejectBadBrightnessMatches = optionsAccessor.GetValueBoolean(nameof(RejectBadBrightnessMatches), false);
             rejectBadlyFittingMatches = optionsAccessor.GetValueBoolean(nameof(RejectBadlyFittingMatches), false);
-            useRANSAC = optionsAccessor.GetValueBoolean(nameof(UseRANSAC), true);
+            useRANSAC = optionsAccessor.GetValueBoolean(nameof(UseRANSAC), false);
             saveImagesOnReruns = optionsAccessor.GetValueBoolean(nameof(SaveImagesOnReruns), false);
             saveAlignmentImages = optionsAccessor.GetValueBoolean(nameof(SaveAlignmentImages), false);
             maxStarsPerRegion = optionsAccessor.GetValueInt32(nameof(MaxStarsPerRegion), -1);

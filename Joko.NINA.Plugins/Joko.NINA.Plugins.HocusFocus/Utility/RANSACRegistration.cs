@@ -376,7 +376,6 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 }
             }
 
-
             return (srcPoints, dstPoints);
         }
 
@@ -788,6 +787,15 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
         public override string ToString() {
             return $"[{M11}, {M12}, {M31}]  [{M21}, {M22}, {M32}]";
+        }
+
+        public string ToFullString() {
+            var scaleX = Math.Sqrt(M11 * M11 + M21 * M21);
+            var scaleY = Math.Sqrt(M12 * M12 + M22 * M22);
+            var rotation = Math.Atan2(M21, M11) * 180 / Math.PI;
+            var translationX = M31;
+            var translationY = M32;
+            return $"Scale(x,y):({scaleX:0.###},{scaleY:0.###}), rotation:{rotation:0.###}deg, translation(x,y):{translationX:0.###},{translationY:0.###}";
         }
     }
 }
